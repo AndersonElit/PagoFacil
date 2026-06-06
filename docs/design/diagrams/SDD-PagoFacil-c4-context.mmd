@@ -1,0 +1,24 @@
+C4Context
+    title PagoFacil — Diagrama de Contexto (C4 Nivel 1)
+
+    Person(usuario, "Usuario Final", "Gestiona su billetera digital: depósitos, retiros y transferencias.")
+    Person(auditor, "Auditor / Compliance", "Revisa alertas de fraude, toma decisiones regulatorias y genera reportes.")
+    Person(admin, "Administrador de Plataforma", "Configura límites transaccionales y reglas del motor de fraude.")
+
+    System(pagofacil, "PagoFacil", "Plataforma fintech de billetera digital multitenancy. Gestiona el ciclo completo de fondos electrónicos con controles KYC, AML, fraude y reportería regulatoria sobre Kubernetes / AWS.")
+
+    System_Ext(cognito, "AWS Cognito", "Identity Provider gestionado. Emite y valida tokens JWT mediante OAuth 2.0 / OpenID Connect.")
+    System_Ext(entFinanciera, "Entidades Financieras / Pasarelas de Pago", "Procesan fondeo y retiro de fondos reales vía REST; envían confirmaciones mediante webhooks.")
+    System_Ext(kycProvider, "Proveedor KYC", "Validación documental y biométrica de identidad durante el onboarding regulado.")
+    System_Ext(amlSanctions, "Listas de Sanciones AML", "Fuentes OFAC / ONU para verificación de personas y entidades sancionadas.")
+
+    Rel(usuario, pagofacil, "Registra cuenta, opera billetera", "HTTPS / REST")
+    Rel(auditor, pagofacil, "Revisa alertas, genera reportes regulatorios", "HTTPS / REST")
+    Rel(admin, pagofacil, "Configura parámetros operacionales", "HTTPS / REST")
+    Rel(pagofacil, cognito, "Delega autenticación OAuth2/OIDC; valida tokens JWT", "HTTPS")
+    Rel(pagofacil, entFinanciera, "Instrucciones de pago y solicitudes de fondeo", "HTTPS / REST")
+    Rel(entFinanciera, pagofacil, "Confirmaciones de fondeo y retiro (webhook)", "HTTPS")
+    Rel(pagofacil, kycProvider, "Envía documentos de identidad para validación KYC", "HTTPS / REST")
+    Rel(pagofacil, amlSanctions, "Consulta listas de sanciones para verificación AML", "HTTPS / REST")
+
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")

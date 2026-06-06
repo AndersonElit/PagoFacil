@@ -137,11 +137,46 @@ O sin argumentos (busca el PID en `docs/planning/` automáticamente):
 
 ---
 
+### Paso 6 — Diseño Técnico (SDD Técnico)
+
+**Objetivo:** Traducir las decisiones estratégicas en una arquitectura técnica concreta: microservicios, módulos, persistencia, contratos de API, diagramas C4, esquema de base de datos e infraestructura como código.
+
+| Campo | Detalle |
+|---|---|
+| Skill | `/technical-design-sdd` |
+| Inputs | [`docs/strategic-design/`](docs/strategic-design/) |
+| Documentos generados | [`docs/design/SDD-PagoFacil-system.md`](docs/design/SDD-PagoFacil-system.md) · [`docs/design/SDD-PagoFacil-design.md`](docs/design/SDD-PagoFacil-design.md) · [`docs/design/SDD-PagoFacil-infrastructure.md`](docs/design/SDD-PagoFacil-infrastructure.md) |
+| Artefactos de soporte | [`docs/design/api/SDD-PagoFacil-openapi.yaml`](docs/design/api/SDD-PagoFacil-openapi.yaml) · [`docs/design/database/SDD-PagoFacil-schema.sql`](docs/design/database/SDD-PagoFacil-schema.sql) · Diagramas C4 ([contexto](docs/design/diagrams/SDD-PagoFacil-c4-context.mmd) / [contenedores](docs/design/diagrams/SDD-PagoFacil-c4-container.mmd)) |
+
+**Cómo replicarlo:**
+
+```
+/technical-design-sdd docs/strategic-design/
+```
+
+O sin argumentos (busca en `docs/strategic-design/` automáticamente):
+
+```
+/technical-design-sdd
+```
+
+**Artefactos generados:**
+
+| Documento | Contenido |
+|---|---|
+| `SDD-PagoFacil-system.md` | Estilo arquitectónico (microservicios event-driven + hexagonal) · Stack tecnológico por capa · 8 microservicios de dominio (BC-01 a BC-06) + projection-service · Estructura de módulos hexagonales (domain / application / infrastructure) · 2 servicios de reportería batch (MS1 Spark ETL, MS2 Lambda Consumer) · Comunicación: Kafka async + REST/mTLS sync · Diagramas C4 de contexto y contenedores |
+| `SDD-PagoFacil-design.md` | Contratos REST por bounded context (26 endpoints agrupados en 6 tags OpenAPI) · Endpoints de compensación idempotentes (Saga) · Estrategia de persistencia CQRS con Database-per-Service · Esquema SQL PostgreSQL por servicio con Flyway · Read Model PostgreSQL desnormalizado (projection-service) · Diseño de topics Kafka con ACL por bounded context · Política de retención y particionamiento |
+| `SDD-PagoFacil-infrastructure.md` | IaC Terraform multi-ambiente (dev K3d / staging+prod EKS) · Tabla completa de componentes de infraestructura AWS · Blue/Green deployment con ArgoCD · Pipeline CI/CD Jenkins → bumpImageTag → ArgoCD sync · Observabilidad: logging JSON + correlationId · Métricas Prometheus + CloudWatch · Trazas OpenTelemetry · Governance: gestión de secretos, RBAC K8s, política de imágenes, gestión de ramas y revisión de código |
+| `SDD-PagoFacil-openapi.yaml` | Especificación OpenAPI 3.0 completa con esquemas JSON para todos los bounded contexts · Seguridad BearerAuth (JWT Cognito) + mTLS para endpoints internos |
+| `SDD-PagoFacil-schema.sql` | DDL completo: tablas por bounded context con constraints, índices y extensiones PostgreSQL (uuid-ossp, pgcrypto) |
+| Diagramas C4 (`.mmd` + `.png`) | Diagrama de contexto del sistema y diagrama de contenedores en Mermaid + renders PNG |
+
+---
+
 ### Próximas etapas
 
 | Etapa | Skill | Input | Output |
 |---|---|---|---|
-| **Paso 6** — Diseño Técnico | `/technical-design-sdd` | `docs/strategic-design/` | `docs/design/` |
 | **Paso 7** — Implementación | `/development-plan` | `docs/design/` | Roadmap maestro + planes por etapa |
 
 ---
@@ -405,3 +440,10 @@ Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requiremen
 | SDD — Dominio y Comportamiento | [`docs/strategic-design/SDD-PagoFacil-domain.md`](docs/strategic-design/SDD-PagoFacil-domain.md) | Paso 5 — Diseño Estratégico |
 | SDD — Seguridad | [`docs/strategic-design/SDD-PagoFacil-security.md`](docs/strategic-design/SDD-PagoFacil-security.md) | Paso 5 — Diseño Estratégico |
 | SDD — Estrategia Arquitectónica | [`docs/strategic-design/SDD-PagoFacil-architecture.md`](docs/strategic-design/SDD-PagoFacil-architecture.md) | Paso 5 — Diseño Estratégico |
+| SDD — Arquitectura del Sistema | [`docs/design/SDD-PagoFacil-system.md`](docs/design/SDD-PagoFacil-system.md) | Paso 6 — Diseño Técnico |
+| SDD — Diseño de APIs y Persistencia | [`docs/design/SDD-PagoFacil-design.md`](docs/design/SDD-PagoFacil-design.md) | Paso 6 — Diseño Técnico |
+| SDD — Infraestructura y Gobernanza | [`docs/design/SDD-PagoFacil-infrastructure.md`](docs/design/SDD-PagoFacil-infrastructure.md) | Paso 6 — Diseño Técnico |
+| OpenAPI 3.0 — Contratos REST | [`docs/design/api/SDD-PagoFacil-openapi.yaml`](docs/design/api/SDD-PagoFacil-openapi.yaml) | Paso 6 — Diseño Técnico |
+| Esquema SQL — DDL por Bounded Context | [`docs/design/database/SDD-PagoFacil-schema.sql`](docs/design/database/SDD-PagoFacil-schema.sql) | Paso 6 — Diseño Técnico |
+| Diagrama C4 — Contexto del Sistema | [`docs/design/diagrams/SDD-PagoFacil-c4-context.mmd`](docs/design/diagrams/SDD-PagoFacil-c4-context.mmd) | Paso 6 — Diseño Técnico |
+| Diagrama C4 — Contenedores | [`docs/design/diagrams/SDD-PagoFacil-c4-container.mmd`](docs/design/diagrams/SDD-PagoFacil-c4-container.mmd) | Paso 6 — Diseño Técnico |

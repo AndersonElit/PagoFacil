@@ -1,0 +1,1230 @@
+openapi: 3.0.3
+info:
+  title: PagoFacil API
+  description: |
+    API pública de la plataforma fintech PagoFacil — Billetera Digital.
+    Agrupa los endpoints por Bounded Context. Todos los endpoints requieren
+    autenticación JWT Bearer emitido por AWS Cognito, validado en API Gateway v2,
+    salvo los de registro y autenticación inicial.
+  version: "1.0.0"
+  contact:
+    name: Equipo PagoFacil
+    email: engineering@pagofacil.io
+
+servers:
+  - url: https://api-dev.pagofacil.io/v1
+    description: Desarrollo (K3d + floci-net)
+  - url: https://api-staging.pagofacil.io/v1
+    description: Staging (AWS EKS us-east-1)
+  - url: https://api.pagofacil.io/v1
+    description: Producción (AWS EKS us-east-1)
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Identity
+    description: "BC-01: Registro, KYC, autenticación MFA y gestión de sesiones."
+  - name: Wallet
+    description: "BC-02: Saldo, depósitos, retiros, transferencias e historial."
+  - name: Fraud
+    description: "BC-03: Reglas de fraude, evaluación AML y gestión de alertas."
+  - name: Audit
+    description: "BC-05: Dashboard de revisión, alertas, generación de reportes regulatorios."
+  - name: Integration — Saga
+    description: "BC-06 (interno): API interna de saga — estado y ejecución. Sólo accesible por servicios con mTLS."
+  - name: Compensaciones
+    description: "Endpoints idempotentes de compensación invocados por el orquestador de sagas."
+
+paths:
+
+  # ────────────────────────────────────────────
+  # BC-01 — Identity
+  # ────────────────────────────────────────────
+
+  /identity/users:
+    post:
+      tags: [Identity]
+      summary: Registro de nuevo usuario
+      description: Crea una cuenta en estado PENDIENTE_KYC e inicia el proceso de validación.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistroUsuarioRequest'
+      responses:
+        '201':
+          description: Cuenta creada en PENDIENTE_KYC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioResponse'
+        '409':
+          description: Email o documento ya registrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /identity/auth/login:
+    post:
+      tags: [Identity]
+      summary: Inicio de sesión (primer factor)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Primer factor válido. Requiere verificación MFA.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginParcialResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Cuenta bloqueada por intentos fallidos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /identity/auth/mfa/verify:
+    post:
+      tags: [Identity]
+      summary: Verificación del segundo factor (MFA)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaVerifyRequest'
+      responses:
+        '200':
+          description: Autenticación completa. Retorna token JWT de sesión.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SesionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /identity/auth/password/recover-request:
+    post:
+      tags: [Identity]
+      summary: Solicitar recuperación de contraseña
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRecoverRequest'
+      responses:
+        '202':
+          description: Solicitud aceptada. Se enviará token al email si la cuenta existe.
+
+  /identity/auth/password/reset:
+    post:
+      tags: [Identity]
+      summary: Restablecer contraseña con token de recuperación
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '204':
+          description: Contraseña restablecida. Sesiones previas invalidadas.
+        '400':
+          description: Token inválido o expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /identity/users/me/kyc-status:
+    get:
+      tags: [Identity]
+      summary: Consultar estado del proceso KYC del usuario autenticado
+      responses:
+        '200':
+          description: Estado actual del proceso KYC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /identity/users/{userId}/compensar:
+    post:
+      tags: [Compensaciones]
+      summary: Compensación — Revertir activación de cuenta (saga KYC)
+      description: Idempotente. Invocado por integration-service ante fallo en el flujo de onboarding.
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompensacionRequest'
+      responses:
+        '200':
+          description: Compensación aplicada o ya aplicada (idempotente).
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ────────────────────────────────────────────
+  # BC-02 — Wallet
+  # ────────────────────────────────────────────
+
+  /wallet/me/balance:
+    get:
+      tags: [Wallet]
+      summary: Consultar saldo de la billetera del usuario autenticado
+      responses:
+        '200':
+          description: Saldo disponible y pendiente en tiempo real (fuente write-side).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SaldoResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /wallet/deposits:
+    post:
+      tags: [Wallet]
+      summary: Iniciar un depósito de fondos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepositoRequest'
+      responses:
+        '202':
+          description: Depósito iniciado. Saga-Deposito en progreso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransaccionResponse'
+        '400':
+          description: Monto excede límites configurados.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /wallet/withdrawals:
+    post:
+      tags: [Wallet]
+      summary: Iniciar un retiro de fondos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetiroRequest'
+      responses:
+        '202':
+          description: Retiro iniciado. Saga-Retiro en progreso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransaccionResponse'
+        '400':
+          description: Saldo insuficiente o límites excedidos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /wallet/transfers:
+    post:
+      tags: [Wallet]
+      summary: Iniciar una transferencia entre billeteras
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferenciaRequest'
+      responses:
+        '202':
+          description: Transferencia iniciada. Evaluación de fraude en progreso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransaccionResponse'
+        '400':
+          description: Saldo insuficiente o destinatario no encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /wallet/transactions:
+    get:
+      tags: [Wallet]
+      summary: Listar historial de transacciones (Read Model)
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDIENTE, EN_PROCESO, CONFIRMADA, FALLIDA, RETENIDA]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Lista paginada de transacciones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransaccionPageResponse'
+
+  /wallet/transactions/{transactionId}:
+    get:
+      tags: [Wallet]
+      summary: Consultar detalle de una transacción
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransaccionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /wallet/deposits/{transactionId}/compensar:
+    post:
+      tags: [Compensaciones]
+      summary: Compensación — Revertir saldo pendiente de un depósito
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompensacionRequest'
+      responses:
+        '200':
+          description: Compensación aplicada o ya aplicada (idempotente).
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /wallet/withdrawals/{transactionId}/compensar:
+    post:
+      tags: [Compensaciones]
+      summary: Compensación — Liberar fondos reservados de un retiro
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompensacionRequest'
+      responses:
+        '200':
+          description: Fondos liberados o ya liberados (idempotente).
+
+  /wallet/transfers/{transactionId}/compensar:
+    post:
+      tags: [Compensaciones]
+      summary: Compensación — Revertir débito+crédito de una transferencia (retención tardía)
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompensacionRequest'
+      responses:
+        '200':
+          description: Transferencia compensada (idempotente).
+
+  # ────────────────────────────────────────────
+  # BC-03 — Fraud
+  # ────────────────────────────────────────────
+
+  /fraud/rules:
+    get:
+      tags: [Fraud]
+      summary: Listar reglas de fraude activas
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReglaFraudeResponse'
+    post:
+      tags: [Fraud]
+      summary: Crear nueva regla de fraude
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReglaFraudeRequest'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReglaFraudeResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /fraud/rules/{ruleId}:
+    put:
+      tags: [Fraud]
+      summary: Actualizar configuración de una regla de fraude
+      parameters:
+        - $ref: '#/components/parameters/RuleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReglaFraudeRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReglaFraudeResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fraud/evaluate:
+    post:
+      tags: [Fraud]
+      summary: Evaluar transacción contra reglas de fraude y AML (uso interno)
+      description: Invocado exclusivamente por integration-service vía mTLS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvaluacionFraudeRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluacionFraudeResponse'
+
+  /fraud/evaluate/{transactionId}/compensar:
+    post:
+      tags: [Compensaciones]
+      summary: Compensación — Liberar retención de fraude sobre una transacción
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompensacionRequest'
+      responses:
+        '200':
+          description: Retención liberada o ya liberada (idempotente).
+
+  # ────────────────────────────────────────────
+  # BC-05 — Audit
+  # ────────────────────────────────────────────
+
+  /audit/transactions:
+    get:
+      tags: [Audit]
+      summary: Buscar transacciones en el dashboard de auditoría (Read Model)
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - name: userId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransaccionPageResponse'
+
+  /audit/alerts:
+    get:
+      tags: [Audit]
+      summary: Listar alertas de fraude y AML (Read Model)
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDIENTE, APROBADA, RECHAZADA]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertaPageResponse'
+
+  /audit/alerts/{alertId}:
+    get:
+      tags: [Audit]
+      summary: Consultar detalle de una alerta
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertaDetalleResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /audit/alerts/{alertId}/resolve:
+    put:
+      tags: [Audit]
+      summary: Resolver alerta de fraude (auditor autorizado)
+      parameters:
+        - $ref: '#/components/parameters/AlertId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolucionAlertaRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertaDetalleResponse'
+        '409':
+          description: La alerta ya fue resuelta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /audit/reports/trigger:
+    post:
+      tags: [Audit]
+      summary: Disparar generación de reporte on-demand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReporteTriggerRequest'
+      responses:
+        '202':
+          description: Job de extracción encolado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReporteJobResponse'
+
+  /audit/reports/{reportId}/status:
+    get:
+      tags: [Audit]
+      summary: Consultar estado de un job de reporte
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReporteJobResponse'
+
+  /audit/reports/{reportId}/download:
+    get:
+      tags: [Audit]
+      summary: Descargar reporte generado desde S3
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '302':
+          description: Redirección a URL pre-firmada de S3 (TTL 15 min).
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ────────────────────────────────────────────
+  # BC-06 — Integration (API interna de Saga)
+  # ────────────────────────────────────────────
+
+  /integration/sagas:
+    post:
+      tags: [Integration — Saga]
+      summary: Iniciar una saga (uso interno, mTLS)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SagaIniciarRequest'
+      responses:
+        '202':
+          description: Saga iniciada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaStatusResponse'
+
+  /integration/sagas/{sagaId}:
+    get:
+      tags: [Integration — Saga]
+      summary: Consultar estado de una saga (uso interno, mTLS)
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SagaStatusResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /integration/sagas/{sagaId}/compensar:
+    post:
+      tags: [Compensaciones]
+      summary: Forzar compensación de una saga (uso interno, mTLS)
+      parameters:
+        - $ref: '#/components/parameters/SagaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompensacionRequest'
+      responses:
+        '202':
+          description: Compensación iniciada.
+
+# ────────────────────────────────────────────
+# Components
+# ────────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT emitido por AWS Cognito (OAuth2/OIDC). Validado por API Gateway v2 antes de enrutar.
+
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TransactionId:
+      name: transactionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AlertId:
+      name: alertId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SagaId:
+      name: sagaId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PageParam:
+      name: page
+      in: query
+      schema:
+        type: integer
+        default: 0
+    SizeParam:
+      name: size
+      in: query
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+
+  responses:
+    Unauthorized:
+      description: Token JWT ausente, inválido o expirado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Sin permiso para acceder al recurso.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Recurso no encontrado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Cuerpo de la solicitud inválido.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+
+    ErrorResponse:
+      type: object
+      required: [code, message, correlationId]
+      properties:
+        code:
+          type: string
+          example: SALDO_INSUFICIENTE
+        message:
+          type: string
+          example: El saldo disponible es insuficiente para completar la operación.
+        correlationId:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+
+    RegistroUsuarioRequest:
+      type: object
+      required: [email, fullName, documentType, documentNumber, password]
+      properties:
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+          maxLength: 255
+        documentType:
+          type: string
+          enum: [DNI, PASSPORT, CE]
+        documentNumber:
+          type: string
+          maxLength: 50
+        password:
+          type: string
+          format: password
+          minLength: 10
+        tenantId:
+          type: string
+          format: uuid
+
+    UsuarioResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        accountStatus:
+          type: string
+          enum: [PENDIENTE_KYC, ACTIVA, SUSPENDIDA, BLOQUEADA]
+        createdAt:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    LoginParcialResponse:
+      type: object
+      properties:
+        mfaSessionToken:
+          type: string
+          description: Token temporal para continuar con la verificación MFA.
+        mfaType:
+          type: string
+          enum: [TOTP, SMS, EMAIL]
+
+    MfaVerifyRequest:
+      type: object
+      required: [mfaSessionToken, mfaCode]
+      properties:
+        mfaSessionToken:
+          type: string
+        mfaCode:
+          type: string
+          minLength: 6
+          maxLength: 6
+
+    SesionResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        expiresIn:
+          type: integer
+          description: Segundos hasta expiración.
+        tokenType:
+          type: string
+          default: Bearer
+
+    PasswordRecoverRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+
+    PasswordResetRequest:
+      type: object
+      required: [recoveryToken, newPassword]
+      properties:
+        recoveryToken:
+          type: string
+        newPassword:
+          type: string
+          format: password
+          minLength: 10
+
+    KycStatusResponse:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        kycStatus:
+          type: string
+          enum: [PENDIENTE, APROBADO, RECHAZADO, EN_REVISION]
+        submittedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+
+    SaldoResponse:
+      type: object
+      properties:
+        walletId:
+          type: string
+          format: uuid
+        availableBalance:
+          type: number
+          format: decimal
+        pendingBalance:
+          type: number
+          format: decimal
+        currency:
+          type: string
+          example: USD
+
+    DepositoRequest:
+      type: object
+      required: [idempotencyKey, amount, fundSourceId]
+      properties:
+        idempotencyKey:
+          type: string
+          maxLength: 255
+        amount:
+          type: number
+          format: decimal
+          minimum: 0.01
+        currency:
+          type: string
+          default: USD
+        fundSourceId:
+          type: string
+          format: uuid
+
+    RetiroRequest:
+      type: object
+      required: [idempotencyKey, amount, fundSourceId]
+      properties:
+        idempotencyKey:
+          type: string
+          maxLength: 255
+        amount:
+          type: number
+          format: decimal
+          minimum: 0.01
+        currency:
+          type: string
+          default: USD
+        fundSourceId:
+          type: string
+          format: uuid
+
+    TransferenciaRequest:
+      type: object
+      required: [idempotencyKey, amount, destinatarioIdentifier]
+      properties:
+        idempotencyKey:
+          type: string
+          maxLength: 255
+        amount:
+          type: number
+          format: decimal
+          minimum: 0.01
+        currency:
+          type: string
+          default: USD
+        destinatarioIdentifier:
+          type: string
+          description: Email o alias del destinatario.
+
+    TransaccionResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        correlationId:
+          type: string
+          format: uuid
+        operationType:
+          type: string
+          enum: [DEPOSITO, RETIRO, TRANSFERENCIA]
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [PENDIENTE, EN_PROCESO, CONFIRMADA, FALLIDA, RETENIDA]
+        createdAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+
+    TransaccionPageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransaccionResponse'
+        totalElements:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    ReglaFraudeRequest:
+      type: object
+      required: [name, ruleType, threshold, action]
+      properties:
+        name:
+          type: string
+        ruleType:
+          type: string
+          enum: [MONTO, FRECUENCIA, PATRON, DESTINATARIO]
+        threshold:
+          type: number
+        action:
+          type: string
+          enum: [BLOQUEAR, RETENER]
+        isActive:
+          type: boolean
+          default: true
+
+    ReglaFraudeResponse:
+      type: object
+      properties:
+        ruleId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        ruleType:
+          type: string
+        threshold:
+          type: number
+        action:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    EvaluacionFraudeRequest:
+      type: object
+      required: [transactionId, userId, amount, operationType]
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        correlationId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+        operationType:
+          type: string
+        counterpartUserId:
+          type: string
+          format: uuid
+
+    EvaluacionFraudeResponse:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [APROBADA, RETENIDA, RECHAZADA]
+        ruleTriggered:
+          type: string
+        alertId:
+          type: string
+          format: uuid
+
+    AlertaPageResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertaDetalleResponse'
+        totalElements:
+          type: integer
+
+    AlertaDetalleResponse:
+      type: object
+      properties:
+        alertId:
+          type: string
+          format: uuid
+        transactionId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        severity:
+          type: string
+          enum: [BAJA, MEDIA, ALTA, CRITICA]
+        status:
+          type: string
+          enum: [PENDIENTE, APROBADA, RECHAZADA]
+        alertType:
+          type: string
+          enum: [FRAUDE, AML]
+        ruleTriggered:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        auditorDecision:
+          $ref: '#/components/schemas/DecisionAuditorResponse'
+
+    DecisionAuditorResponse:
+      type: object
+      properties:
+        auditorId:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [APROBADA, RECHAZADA]
+        justification:
+          type: string
+        decidedAt:
+          type: string
+          format: date-time
+
+    ResolucionAlertaRequest:
+      type: object
+      required: [decision, justification]
+      properties:
+        decision:
+          type: string
+          enum: [APROBADA, RECHAZADA]
+        justification:
+          type: string
+          minLength: 10
+          maxLength: 1000
+
+    ReporteTriggerRequest:
+      type: object
+      required: [reportType, periodFrom, periodTo, formats]
+      properties:
+        reportType:
+          type: string
+          enum: [transacciones-diario, reporte-aml, alertas-fraude, saldo-usuarios, conciliacion]
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        formats:
+          type: array
+          items:
+            type: string
+            enum: [PDF, XLS, CSV]
+
+    ReporteJobResponse:
+      type: object
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        reportType:
+          type: string
+        status:
+          type: string
+          enum: [ENCOLADO, EXTRAYENDO, PROCESANDO, COMPLETADO, FALLIDO]
+        requestedBy:
+          type: string
+          format: uuid
+        requestedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    SagaIniciarRequest:
+      type: object
+      required: [sagaType, correlationId, payload]
+      properties:
+        sagaType:
+          type: string
+          enum: [DEPOSITO, RETIRO, TRANSFERENCIA, CONCILIACION]
+        correlationId:
+          type: string
+          format: uuid
+        payload:
+          type: object
+
+    SagaStatusResponse:
+      type: object
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+        sagaType:
+          type: string
+        state:
+          type: string
+          enum: [INICIADA, EN_PROGRESO, COMPLETADA, COMPENSANDO, COMPENSADA, FALLIDA]
+        currentStep:
+          type: string
+        correlationId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CompensacionRequest:
+      type: object
+      required: [correlationId, reason]
+      properties:
+        correlationId:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        payload:
+          type: object
