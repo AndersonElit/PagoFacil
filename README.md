@@ -2,11 +2,9 @@
 
 Plataforma de billetera digital segura, escalable y de alta disponibilidad para la gestión de fondos electrónicos con garantías de integridad, trazabilidad y cumplimiento regulatorio.
 
-> Documento de referencia: [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md)
-
 ---
 
-## Descripcion del proyecto
+## Descripción del proyecto
 
 | Campo | Detalle |
 |---|---|
@@ -14,9 +12,9 @@ Plataforma de billetera digital segura, escalable y de alta disponibilidad para 
 | Dominio de negocio | Finanzas / Fintech |
 | Sponsor | Por definir |
 | Project Manager | Por definir |
-| Duracion estimada | ~36-46 semanas (sujeto a aprobacion tras estimacion detallada) |
-| Modalidad de despliegue | Nube publica — contenedores (Kubernetes) |
-| Metodologia | Agil con hitos por fases |
+| Duración estimada | ~36-46 semanas (sujeto a aprobación tras estimación detallada) |
+| Modalidad de despliegue | Nube pública — contenedores (Kubernetes) |
+| Metodología | Ágil con hitos por fases |
 
 PagoFacil provee una plataforma centralizada y propia para gestionar fondos electrónicos, ejecutar transferencias y consultar movimientos, eliminando la dependencia de soluciones de terceros con limitada integración y control.
 
@@ -55,57 +53,120 @@ PagoFacil provee una plataforma centralizada y propia para gestionar fondos elec
 
 ### Incluido
 
-| Area | Detalle |
+| Área | Detalle |
 |---|---|
-| Identidad | Registro y autenticacion con MFA; modulo KYC y controles AML |
-| Operaciones | Deposito, retiro y transferencia entre usuarios |
-| Consultas | Saldo actual e historial auditable con paginacion y filtros |
-| Seguridad | Cifrado TLS 1.2+ en transito, AES-256 en reposo, vault para secretos |
+| Identidad | Registro y autenticación con MFA; módulo KYC y controles AML |
+| Operaciones | Depósito, retiro y transferencia entre usuarios |
+| Consultas | Saldo actual e historial auditable con paginación y filtros |
+| Seguridad | Cifrado TLS 1.2+ en tránsito, AES-256 en reposo, vault para secretos |
 | APIs | REST/async autenticadas (OAuth 2.0 / OpenID Connect) para integraciones externas |
-| Transacciones | Procesamiento asincrono con idempotencia y conciliacion automatica |
-| Fraude | Monitoreo y deteccion en tiempo real; alertas ante patrones sospechosos |
-| Limites | Configurables por usuario, tipo de operacion y periodo |
-| Auditoria | Dashboard para revision de transacciones y reportes regulatorios |
-| Observabilidad | Logging estructurado, metricas, trazas distribuidas (OpenTelemetry) y alertas |
+| Transacciones | Procesamiento asíncrono con idempotencia y conciliación automática |
+| Fraude | Monitoreo y detección en tiempo real; alertas ante patrones sospechosos |
+| Límites | Configurables por usuario, tipo de operación y período |
+| Auditoría | Dashboard para revisión de transacciones y reportes regulatorios |
+| Observabilidad | Logging estructurado, métricas, trazas distribuidas (OpenTelemetry) y alertas |
 | Disponibilidad | Alta disponibilidad, escalamiento horizontal y plan DR |
-| Compliance | Proteccion de datos personales, normativas KYC/AML |
-| Multitenancy | Segmentacion por canal de distribucion para alianzas futuras |
+| Compliance | Protección de datos personales, normativas KYC/AML |
+| Multitenancy | Segmentación por canal de distribución para alianzas futuras |
 
 ### Fuera del alcance (fase inicial)
 
-- Aplicaciones moviles nativas (iOS/Android) — se proveen APIs para integracion posterior.
-- Integracion directa con redes de tarjetas (Visa/Mastercard).
-- Modulo de credito o prestamos.
+- Aplicaciones móviles nativas (iOS/Android) — se proveen APIs para integración posterior.
+- Integración directa con redes de tarjetas (Visa/Mastercard).
+- Módulo de crédito o préstamos.
 - Soporte multimoneda.
 
 ---
 
-## Requerimientos no funcionales
+## Actores del Sistema
 
-| Atributo | Meta |
+| Actor | Descripción | Responsabilidades Principales |
+|---|---|---|
+| Usuario Final | Titular de la billetera digital | Registro, autenticación, fondeo, retiro, transferencia y consulta de movimientos |
+| Administrador de Plataforma | Personal interno con acceso privilegiado | Gestión de configuración, límites transaccionales, revisión de alertas y soporte operacional |
+| Auditor / Compliance | Oficial de cumplimiento o auditor interno | Revisión del dashboard de auditoría, generación de reportes regulatorios, gestión de casos AML |
+| Entidad Financiera | Proveedor bancario o pasarela de pago externa | Fondeo y liquidación de operaciones mediante APIs autenticadas |
+| Sistema de Fraude (interno) | Motor automatizado de detección de fraude | Evaluación en tiempo real de patrones transaccionales sospechosos |
+| Sistema de Notificaciones (interno) | Servicio de alertas y comunicaciones | Emisión de notificaciones a usuarios y administradores ante eventos relevantes |
+
+---
+
+## Requerimientos Funcionales
+
+| ID | Nombre |
 |---|---|
-| Disponibilidad | 99.9% uptime minimo |
-| Rendimiento | < 500 ms para el 95% de consultas bajo carga nominal |
-| Seguridad | TLS 1.2+ en transito · AES-256 en reposo · vault para secretos |
-| Consistencia | Garantias ACID para operaciones financieras criticas |
-| Recuperacion | RTO < 1 hora · RPO < 15 minutos |
-| Escalabilidad | Escalamiento horizontal automatico |
-| Observabilidad | Logging + metricas + trazas distribuidas (OpenTelemetry) |
-| Idempotencia | Toda operacion financiera reintentable sin generar duplicados |
-| Compliance | GDPR / Ley de proteccion de datos · KYC · AML |
-| Mantenibilidad | Microservicios modulares con separacion clara de responsabilidades |
+| RF-001 | Registro de Usuario |
+| RF-002 | Validación de Identidad (KYC) |
+| RF-003 | Autenticación con MFA |
+| RF-004 | Recuperación de Contraseña |
+| RF-005 | Consulta de Saldo |
+| RF-006 | Depósito de Fondos |
+| RF-007 | Retiro de Fondos |
+| RF-008 | Transferencia entre Usuarios |
+| RF-009 | Historial de Movimientos |
+| RF-010 | Identificadores Únicos de Operación |
+| RF-011 | Idempotencia de Operaciones Financieras |
+| RF-012 | Conciliación Automática |
+| RF-013 | Gestión de Límites Transaccionales |
+| RF-014 | Monitoreo de Fraude en Tiempo Real |
+| RF-015 | Controles AML |
+| RF-016 | Gestión de Alertas |
+| RF-017 | Dashboard de Auditoría |
+| RF-018 | APIs de Integración Externa |
+| RF-019 | Procesamiento Asíncrono de Transacciones |
+| RF-020 | Soporte Multitenancy |
+
+Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md)
+
+---
+
+## Requerimientos No Funcionales
+
+| ID | Atributo | Meta |
+|---|---|---|
+| RNF-001 | Disponibilidad | 99.9% uptime mínimo (máx. 43.8 min de inactividad no planificada/mes) |
+| RNF-002 | Rendimiento | < 500 ms para el 95% de consultas; < 2 s para encolamiento de operaciones bajo carga nominal |
+| RNF-003 | Seguridad en tránsito y reposo | TLS 1.2+ en tránsito · AES-256 en reposo · vault para secretos |
+| RNF-004 | Autenticación y autorización | OAuth 2.0 / OpenID Connect para APIs externas · mTLS para servicios internos · mínimo privilegio |
+| RNF-005 | Consistencia financiera | Garantías ACID · patrón Saga con compensación · outbox pattern |
+| RNF-006 | Escalabilidad | Escalamiento horizontal automático · soporte ≥ 10x volumen inicial sin rediseño |
+| RNF-007 | Observabilidad | Logging estructurado (JSON) + métricas (Prometheus) + trazas distribuidas (OpenTelemetry) |
+| RNF-008 | Idempotencia de API | Idempotency key obligatorio en operaciones financieras; reintentos sin efectos duplicados |
+| RNF-009 | Mantenibilidad | Microservicios modulares · cobertura de pruebas automatizadas ≥ 80% en módulos críticos |
+| RNF-010 | Cumplimiento regulatorio | GDPR / Ley de protección de datos · KYC · AML · registros inmutables por período legal |
+| RNF-011 | Resistencia a fallos | Circuit breakers · reintentos con backoff exponencial · degradación controlada ante fallos parciales |
+| — | Recuperación | RTO < 1 hora · RPO < 15 minutos |
+
+---
+
+## Reglas de Negocio
+
+| ID | Regla |
+|---|---|
+| RN-001 | Una cuenta solo puede activarse tras la aprobación exitosa del proceso KYC. |
+| RN-002 | Un usuario con cuenta suspendida, bloqueada o pendiente de KYC no puede ejecutar operaciones financieras. |
+| RN-003 | El saldo de una billetera no puede ser negativo. Toda operación que resulte en saldo negativo es rechazada. |
+| RN-004 | Los fondos depositados no están disponibles hasta confirmación de la entidad financiera externa. |
+| RN-005 | Toda operación financiera genera un registro inmutable con identificador único, timestamp, actor, monto, estado y resultado. |
+| RN-006 | Una operación confirmada no puede revertirse de forma unilateral; requiere proceso de disputa formal con aprobación de auditor. |
+| RN-007 | El sistema rechaza operaciones de usuarios o contrapartes en listas de sanciones AML activas, generando evento auditable. |
+| RN-008 | Los límites transaccionales configurados por el administrador tienen precedencia; el usuario no puede elevar sus propios límites. |
+| RN-009 | Las transacciones marcadas como sospechosas quedan retenidas hasta resolución manual por un auditor autorizado. |
+| RN-010 | Las contraseñas se almacenan con hash (bcrypt o Argon2) con salt único por usuario. Prohibido texto plano o hash reversible. |
+| RN-011 | La expiración de sesión no cancela ni revierte operaciones ya encoladas. |
+| RN-012 | La retención mínima de registros de transacciones y auditoría es la exigida por normativa; en ausencia de ésta, no inferior a 5 años. |
 
 ---
 
 ## Arquitectura y principios de diseño
 
-- **Security by Design** y **Privacy by Design** desde las etapas iniciales.
-- **Arquitectura hexagonal / puertos y adaptadores** para separar logica de negocio de infraestructura y facilitar pruebas automatizadas.
-- **Event-driven architecture** con bus de eventos para procesamiento asincrono, trazabilidad y desacoplamiento con sistemas externos.
-- **Idempotencia** en todas las operaciones financieras: cada operacion puede reintentarse de forma segura sin generar duplicados.
-- **Multitenancy / segmentacion por canal** para alianzas futuras con entidades financieras.
-- **Dashboard de auditoria** para revision de transacciones, reportes regulatorios y gestion de alertas.
-- Despliegue en nube publica con contenedores (**Kubernetes**).
+- **Security by Design** y **Privacy by Design** desde las etapas iniciales de arquitectura.
+- **Arquitectura hexagonal / puertos y adaptadores** para separar lógica de negocio de infraestructura y facilitar pruebas automatizadas.
+- **Event-driven architecture** con bus de eventos para procesamiento asíncrono, trazabilidad y desacoplamiento con sistemas externos.
+- **Idempotencia** en todas las operaciones financieras: cada operación puede reintentarse de forma segura sin generar duplicados.
+- **Multitenancy / segmentación por canal** para alianzas futuras con entidades financieras.
+- **Dashboard de auditoría** para revisión de transacciones, reportes regulatorios y gestión de alertas de fraude.
+- Despliegue en nube pública con contenedores (**Kubernetes**).
 
 ---
 
@@ -113,59 +174,59 @@ PagoFacil provee una plataforma centralizada y propia para gestionar fondos elec
 
 | Stakeholder | Rol | Responsabilidad |
 |---|---|---|
-| Sponsor ejecutivo | Patrocinador | Aprobacion de presupuesto y priorizacion estrategica |
-| Project Manager | Gestion de proyecto | Planificacion, seguimiento y control |
-| Arquitecto de software | Diseno tecnico | Arquitectura, estandares y revision de diseno |
-| Equipo de desarrollo | Implementacion | Construccion, pruebas unitarias e integracion |
-| Equipo de seguridad | Seguridad de la informacion | Revision de controles, pentesting y cumplimiento |
-| Oficial de cumplimiento | Compliance / Regulatorio | Validacion KYC, AML y proteccion de datos |
+| Sponsor ejecutivo | Patrocinador | Aprobación de presupuesto y priorización estratégica |
+| Project Manager | Gestión de proyecto | Planificación, seguimiento y control |
+| Arquitecto de software | Diseño técnico | Arquitectura, estándares y revisión de diseño |
+| Equipo de desarrollo | Implementación | Construcción, pruebas unitarias e integración |
+| Equipo de seguridad | Seguridad de la información | Revisión de controles, pentesting y cumplimiento |
+| Oficial de cumplimiento | Compliance / Regulatorio | Validación KYC, AML y protección de datos |
 | Equipo de operaciones | DevOps / SRE | Infraestructura, despliegue y observabilidad |
-| Usuarios finales | Usuarios de la plataforma | Gestion de fondos y transacciones |
-| Entidades financieras | Integracion externa | Proveedores de fondeo, liquidacion y servicios financieros |
+| Usuarios finales | Usuarios de la plataforma | Gestión de fondos y transacciones |
+| Entidades financieras | Integración externa | Proveedores de fondeo, liquidación y servicios financieros |
 
 ---
 
 ## Cronograma de alto nivel
 
-| Fase | Descripcion | Duracion Estimada |
+| Fase | Descripción | Duración Estimada |
 |---|---|---|
-| 0 — Iniciacion | Designacion de sponsor y PM; marco regulatorio; conformacion del equipo | 2 semanas |
-| 1 — Analisis de Requerimientos | Levantamiento de requerimientos; casos de uso core | 3-4 semanas |
-| 2 — Diseno Estrategico | Arquitectura de alto nivel; contratos de APIs; estrategia de seguridad | 3-4 semanas |
-| 3 — Diseno Tecnico | Diseno detallado de microservicios; especificaciones de integracion | 3-4 semanas |
-| 4 — Implementacion Fase 1 | Nucleo financiero: identidad, operaciones core, seguridad base | 10-12 semanas |
-| 5 — Implementacion Fase 2 | Fraude, AML, dashboard de auditoria, integraciones externas | 8-10 semanas |
-| 6 — QA y Seguridad | Pruebas funcionales, de carga, penetracion y cumplimiento | 4-6 semanas |
-| 7 — Despliegue y Estabilizacion | Produccion, monitoreo intensivo y ajustes post-lanzamiento | 3-4 semanas |
+| 0 — Iniciación | Designación de sponsor y PM; marco regulatorio; conformación del equipo | 2 semanas |
+| 1 — Análisis de Requerimientos | Levantamiento de requerimientos; casos de uso core | 3-4 semanas |
+| 2 — Diseño Estratégico | Arquitectura de alto nivel; contratos de APIs; estrategia de seguridad | 3-4 semanas |
+| 3 — Diseño Técnico | Diseño detallado de microservicios; especificaciones de integración | 3-4 semanas |
+| 4 — Implementación Fase 1 | Núcleo financiero: identidad, operaciones core, seguridad base | 10-12 semanas |
+| 5 — Implementación Fase 2 | Fraude, AML, dashboard de auditoría, integraciones externas | 8-10 semanas |
+| 6 — QA y Seguridad | Pruebas funcionales, de carga, penetración y cumplimiento | 4-6 semanas |
+| 7 — Despliegue y Estabilización | Producción, monitoreo intensivo y ajustes post-lanzamiento | 3-4 semanas |
 | **Total estimado** | | **~36-46 semanas** |
 
 ---
 
 ## Riesgos conocidos
 
-| Riesgo | Probabilidad | Impacto | Mitigacion |
+| Riesgo | Probabilidad | Impacto | Mitigación |
 |---|---|---|---|
-| Cambios regulatorios KYC/AML durante el desarrollo | Media | Alto | Oficial de cumplimiento desde analisis; diseno modular |
-| Vulnerabilidades en componentes de terceros | Media | Critico | SBOM, pentesting por fase, revision criptografica |
+| Cambios regulatorios KYC/AML durante el desarrollo | Media | Alto | Oficial de cumplimiento desde análisis; diseño modular |
+| Vulnerabilidades en componentes de terceros | Media | Crítico | SBOM, pentesting por fase, revisión criptográfica |
 | APIs de entidades financieras no disponibles | Alta | Alto | Contratos previos al inicio; adaptadores desacoplados; mocks |
-| Subestimacion del volumen transaccional | Media | Alto | Pruebas de carga desde QA; escalamiento horizontal desde el origen |
-| Debilidad en controles antifraude | Media | Critico | Motor de reglas configurable; revision periodica con oficial de cumplimiento |
-| Inconsistencias en transacciones distribuidas | Baja | Critico | Saga / outbox pattern; idempotencia; conciliacion automatica; pruebas de caos |
-| Retrasos por falta de sponsor y PM | Alta | Alto | Designacion como condicion previa al arranque |
+| Subestimación del volumen transaccional | Media | Alto | Pruebas de carga desde QA; escalamiento horizontal desde el origen |
+| Debilidad en controles antifraude | Media | Crítico | Motor de reglas configurable; revisión periódica con oficial de cumplimiento |
+| Inconsistencias en transacciones distribuidas | Baja | Crítico | Saga / outbox pattern; idempotencia; conciliación automática; pruebas de caos |
+| Retrasos por falta de sponsor y PM | Alta | Alto | Designación como condición previa al arranque |
 
 ---
 
-## Criterios de exito
+## Criterios de éxito
 
 | Criterio | Indicador Medible |
 |---|---|
-| Disponibilidad | Uptime >= 99.9% en 90 dias post-lanzamiento |
+| Disponibilidad | Uptime ≥ 99.9% en 90 días post-lanzamiento |
 | Rendimiento | < 500 ms para el 95% de consultas bajo carga nominal |
-| Cumplimiento regulatorio | Cero observaciones criticas en auditoria KYC/AML en primer ciclo |
-| Seguridad | Cero vulnerabilidades criticas no resueltas al momento del despliegue |
-| Integridad financiera | Tasa de discrepancias en conciliacion < 0.01% del total diario |
-| Cobertura de pruebas | >= 80% en modulos criticos (nucleo financiero, seguridad) |
-| Recuperacion ante desastres | RTO < 1h y RPO < 15min verificados en ejercicio previo al lanzamiento |
+| Cumplimiento regulatorio | Cero observaciones críticas en auditoría KYC/AML en primer ciclo |
+| Seguridad | Cero vulnerabilidades críticas no resueltas al momento del despliegue |
+| Integridad financiera | Tasa de discrepancias en conciliación < 0.01% del total diario |
+| Cobertura de pruebas | ≥ 80% en módulos críticos (núcleo financiero, seguridad) |
+| Recuperación ante desastres | RTO < 1h y RPO < 15min verificados en ejercicio previo al lanzamiento |
 | Incidentes de fraude | Tasa de transacciones fraudulentas no detectadas < umbral regulatorio |
 
 ---
@@ -176,21 +237,24 @@ PagoFacil provee una plataforma centralizada y propia para gestionar fondos elec
 
 - Conectividad con entidades bancarias o proveedores de fondeo mediante APIs disponibles y contratadas.
 - El equipo cuenta con experiencia en microservicios y seguridad en aplicaciones financieras.
-- Las normativas regulatorias aplicables se definen con el oficial de cumplimiento antes del inicio de la implementacion.
-- Infraestructura en nube publica con soporte completo a contenedores (Kubernetes).
+- Las normativas regulatorias aplicables se definen con el oficial de cumplimiento antes del inicio de la implementación.
+- Infraestructura en nube pública con soporte completo a contenedores (Kubernetes).
+- Los usuarios acceden a la plataforma a través de canales digitales (web o apps móviles que consumen las APIs expuestas).
 
 **Restricciones:**
 
-- Cumplimiento con legislacion de proteccion de datos personales vigente en la jurisdiccion de operacion.
+- Cumplimiento con legislación de protección de datos personales vigente en la jurisdicción de operación.
 - Credenciales y datos sensibles no pueden almacenarse en texto plano bajo ninguna circunstancia.
-- APIs externas deben implementar autenticacion OAuth 2.0 / OpenID Connect sin excepcion.
-- Datos de transacciones financieras deben conservarse por el periodo minimo exigido por normativa.
-- Presupuesto y plazos sujetos a aprobacion formal del sponsor ejecutivo.
+- APIs externas deben implementar autenticación OAuth 2.0 / OpenID Connect sin excepción.
+- Datos de transacciones financieras deben conservarse por el período mínimo exigido por normativa.
+- Presupuesto y plazos sujetos a aprobación formal del sponsor ejecutivo.
 
 ---
 
-## Documentacion
+## Documentación
 
 | Documento | Ruta | Etapa SDLC |
 |---|---|---|
-| Project Initiation Document (PID) | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) | Planeacion |
+| Input del proyecto | [`requerimiento/input-pagofacil.md`](requerimiento/input-pagofacil.md) | Planeación |
+| Project Initiation Document (PID) | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) | Planeación |
+| Software Requirements Specification (SRS) | [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) | Análisis de Requerimientos |
