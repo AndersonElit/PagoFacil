@@ -111,12 +111,37 @@ O sin argumentos (busca el PID en `docs/planning/` automáticamente):
 
 ---
 
+### Paso 5 — Diseño Estratégico (SDD)
+
+**Objetivo:** Modelar el dominio del negocio, establecer el lenguaje ubicuo, definir bounded contexts y su mapa de relaciones, diseñar el modelo de seguridad con threat modeling, e identificar los drivers y decisiones estratégicas que guiarán el diseño técnico.
+
+| Campo | Detalle |
+|---|---|
+| Skill | `/strategic-design-sdd` |
+| Inputs | [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) · [`docs/planning/ADC-PagoFacil.md`](docs/planning/ADC-PagoFacil.md) |
+| Documentos generados | [`docs/strategic-design/SDD-PagoFacil-domain.md`](docs/strategic-design/SDD-PagoFacil-domain.md) · [`docs/strategic-design/SDD-PagoFacil-security.md`](docs/strategic-design/SDD-PagoFacil-security.md) · [`docs/strategic-design/SDD-PagoFacil-architecture.md`](docs/strategic-design/SDD-PagoFacil-architecture.md) |
+
+**Cómo replicarlo:**
+
+```
+/strategic-design-sdd docs/requirements/SRS-PagoFacil.md docs/planning/ADC-PagoFacil.md
+```
+
+**Artefactos generados:**
+
+| Documento | Contenido |
+|---|---|
+| `SDD-PagoFacil-domain.md` | Visión del dominio · Ubiquitous Language (26 términos) · 7 Bounded Contexts con Database-per-Service · Context Map con ACL para sistemas externos · 3 flujos de saga (Deposito, Retiro, Transferencia) · 5 Aggregates con reglas de dominio · 23 eventos de dominio con eventos de compensación · 7 workflows de negocio · 6 features BDD con escenarios Gherkin |
+| `SDD-PagoFacil-security.md` | 7 principios de seguridad (Zero Trust, Defense in Depth, Least Privilege…) · Modelo de identidad dual (Cognito externo + mTLS interno) · RBAC por bounded context · Clasificación de 10 categorías de datos sensibles · 15 amenazas STRIDE ordenadas por impacto · 7 zonas de confianza con controles por cruce de trust boundary |
+| `SDD-PagoFacil-architecture.md` | 9 atributos de calidad con SLAs del ADC · 14 restricciones fijas · 13 decisiones estratégicas (DS-001…DS-009 + DS-CQRS-1/2/3) · 7 riesgos clasificados · 7 tradeoffs aceptados · Próximos pasos y bloqueadores críticos |
+
+---
+
 ### Próximas etapas
 
 | Etapa | Skill | Input | Output |
 |---|---|---|---|
-| **Paso 5** — Diseño Estratégico | `/strategic-design-sdd` | `SRS-PagoFacil.md` + `ADC-PagoFacil.md` | `docs/strategic-design/SDD-PagoFacil.md` |
-| **Paso 6** — Diseño Técnico | `/technical-design-sdd` | `docs/strategic-design/` | `docs/design/SDD-Tecnico-PagoFacil.md` |
+| **Paso 6** — Diseño Técnico | `/technical-design-sdd` | `docs/strategic-design/` | `docs/design/` |
 | **Paso 7** — Implementación | `/development-plan` | `docs/design/` | Roadmap maestro + planes por etapa |
 
 ---
@@ -377,3 +402,6 @@ Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requiremen
 | Project Initiation Document (PID) | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) | Paso 2 — Planeación |
 | Software Requirements Specification (SRS) | [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) | Paso 3 — Análisis de Requerimientos |
 | Architectural Decision Context (ADC) | [`docs/planning/ADC-PagoFacil.md`](docs/planning/ADC-PagoFacil.md) | Paso 4 — Contexto Arquitectónico |
+| SDD — Dominio y Comportamiento | [`docs/strategic-design/SDD-PagoFacil-domain.md`](docs/strategic-design/SDD-PagoFacil-domain.md) | Paso 5 — Diseño Estratégico |
+| SDD — Seguridad | [`docs/strategic-design/SDD-PagoFacil-security.md`](docs/strategic-design/SDD-PagoFacil-security.md) | Paso 5 — Diseño Estratégico |
+| SDD — Estrategia Arquitectónica | [`docs/strategic-design/SDD-PagoFacil-architecture.md`](docs/strategic-design/SDD-PagoFacil-architecture.md) | Paso 5 — Diseño Estratégico |
