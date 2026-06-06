@@ -97,7 +97,7 @@ O sin argumentos (busca el PID en `docs/planning/` automáticamente):
 | Integración / Saga | Apache Camel 4.10.2 + Narayana LRA |
 | Frontend | Next.js 15.3 + TypeScript 5 + React 19 |
 | BD operacional (command) | PostgreSQL 16.3 (CQRS write side) |
-| BD read model / auditoría | MongoDB 7 (CQRS read side) |
+| BD read model / auditoría | ~~MongoDB 7~~ → **PostgreSQL 16.3** (`pagofacil_readmodel`) ¹ |
 | Mensajería | Apache Kafka 3.7.0 (KRaft) |
 | Identidad / Auth | AWS Cognito — OAuth 2.0 / OpenID Connect |
 | Secrets | AWS Secrets Manager |
@@ -108,6 +108,8 @@ O sin argumentos (busca el PID en `docs/planning/` automáticamente):
 | Reportería serverless | AWS Lambda + EventBridge + S3 |
 | Observabilidad | OpenTelemetry + Prometheus + CloudWatch |
 | Calidad de código | SonarQube LTS Community |
+
+> ¹ **Override en Diseño Técnico (ADR-002):** DS-CQRS-1 del Diseño Estratégico definía MongoDB para el Read Model. El Diseño Técnico reemplazó MongoDB por PostgreSQL 16.3 (`pagofacil_readmodel`) para homogeneizar el motor de base de datos en toda la plataforma y simplificar el acceso JDBC desde los jobs Spark. No existe ninguna base de datos MongoDB en la arquitectura final.
 
 ---
 
@@ -173,11 +175,55 @@ O sin argumentos (busca en `docs/strategic-design/` automáticamente):
 
 ---
 
-### Próximas etapas
+### Paso 7 — Plan de Desarrollo (Implementación)
 
-| Etapa | Skill | Input | Output |
-|---|---|---|---|
-| **Paso 7** — Implementación | `/development-plan` | `docs/design/` | Roadmap maestro + planes por etapa |
+**Objetivo:** Transformar los documentos de Diseño Técnico en planes de trabajo concretos, secuenciales y accionables para la etapa de Implementación del SDLC. Cada plan es un documento independiente que un desarrollador puede seguir de forma autónoma bajo TDD (Red-Green-Refactor).
+
+| Campo | Detalle |
+|---|---|
+| Skill | `/development-plan` |
+| Input | [`docs/design/`](docs/design/) |
+| Directorio de salida | [`docs/development/`](docs/development/) |
+| Commit de referencia | `82cec55` — incorporar liquibase diseño pagafacil |
+| Ambiente objetivo | `dev`: floci (LocalStack) + K3d (Kubernetes local en Docker) |
+
+**Cómo replicarlo:**
+
+```
+/development-plan docs/design/
+```
+
+O sin argumentos (busca en `docs/design/` automáticamente):
+
+```
+/development-plan
+```
+
+**19 documentos generados:**
+
+| Documento | Contenido |
+|---|---|
+| [`DEV-PagoFacil-roadmap.md`](docs/development/DEV-PagoFacil-roadmap.md) | Índice maestro · mapa de microservicios · mapa de features frontend · ambiente local floci+K3d · Definition of Done con criterios TDD |
+| [`DEV-PagoFacil-00-infrastructure.md`](docs/development/DEV-PagoFacil-00-infrastructure.md) | Scripts de infraestructura base (`base-infrastructure-builder.sh` · `init-dev-environment.sh`) · floci + K3d + SonarQube + Narayana LRA + WireMock · checklist de criterios de aceptación |
+| [`DEV-PagoFacil-01-databases.md`](docs/development/DEV-PagoFacil-01-databases.md) | 7 bases de datos PostgreSQL (Database-per-Service) · changelogs Liquibase standalone por servicio · seed del catálogo de reportes (BC-07) · `init-databases.sh` + `run-liquibase-migrations.sh` |
+| [`DEV-PagoFacil-02-scaffold.md`](docs/development/DEV-PagoFacil-02-scaffold.md) | Comando completo de `scaffold-all-services.sh` con todos los parámetros · Jenkinsfiles Maven/sbt/Vercel · Dockerfiles multi-stage · Helm charts (Deployment / CronJob) · secrets floci · pasos 1-14 del scaffold |
+| [`DEV-PagoFacil-02b-cicd.md`](docs/development/DEV-PagoFacil-02b-cicd.md) | Shared Library Jenkins (11 steps) · controller K3d (`docker run` idempotente) · jobs Multibranch Pipeline · webhooks Gitea · ArgoCD ApplicationSet · `setup-cicd-pipeline.sh` autónomo en dev |
+| [`DEV-PagoFacil-03-ms-identity-service.md`](docs/development/DEV-PagoFacil-03-ms-identity-service.md) | BC-01 · ciclo de vida de cuenta · KYC · MFA · JWT Cognito · participante de saga · TDD por capa (dominio → aplicación → infraestructura R2DBC → REST WebFlux) |
+| [`DEV-PagoFacil-03-ms-wallet-service.md`](docs/development/DEV-PagoFacil-03-ms-wallet-service.md) | BC-02 · saldo · depósito/retiro/transferencia ACID · Outbox Pattern · idempotencia · 3 endpoints de compensación · TDD completo con StepVerifier |
+| [`DEV-PagoFacil-03-ms-fraud-service.md`](docs/development/DEV-PagoFacil-03-ms-fraud-service.md) | BC-03 · reglas de fraude configurables · verificación AML · alertas con severidad · Kafka consumer idempotente · compensación de saga |
+| [`DEV-PagoFacil-03-ms-notification-service.md`](docs/development/DEV-PagoFacil-03-ms-notification-service.md) | BC-04 · consumer multi-topic · plantillas de notificación · gateways de canal (SMTP / SMS / FCM) · flujo degradado sin plantilla |
+| [`DEV-PagoFacil-03-ms-audit-service.md`](docs/development/DEV-PagoFacil-03-ms-audit-service.md) | BC-05+07 · dashboard Read Model · resolución de alertas inmutable · gestión de `report_jobs` · URL pre-firmada S3 · dos data sources R2DBC |
+| [`DEV-PagoFacil-03-ms-projection-service.md`](docs/development/DEV-PagoFacil-03-ms-projection-service.md) | CQRS Read Model · único escritor de `pagofacil_readmodel` · proyectores por evento (8 topics) · UPSERT idempotente · métrica `projection.lag.seconds` |
+| [`DEV-PagoFacil-03-ms-integration-service.md`](docs/development/DEV-PagoFacil-03-ms-integration-service.md) | BC-06 · ACL + orquestador de sagas · rutas Camel (3 sistemas externos) · Narayana LRA · Resilience4j (retry + circuit breaker) · TDD con WireMock + camel-test-spring-junit5 |
+| [`DEV-PagoFacil-03-ms-report-extraction-service.md`](docs/development/DEV-PagoFacil-03-ms-report-extraction-service.md) | MS1 Spark batch · `SparkJdbcSourceAdapter` (Read Model JDBC) · validación de schema contra catálogo · Parquet `raw/` en S3 · CronJob K8s · TDD ScalaTest + Testcontainers |
+| [`DEV-PagoFacil-03-ms-report-processing-service.md`](docs/development/DEV-PagoFacil-03-ms-report-processing-service.md) | MS2 Spark batch · patrón Factory (5 transformadores) · Principio Abierto/Cerrado · Parquet `processed/` en S3 · trigger por `report.extracted` Kafka |
+| [`DEV-PagoFacil-04-fe-auth.md`](docs/development/DEV-PagoFacil-04-fe-auth.md) | Feature auth · registro + MFA + recuperación de contraseña · schemas Zod · hooks TanStack Query · MSW · Playwright ATDD · NextAuth.js |
+| [`DEV-PagoFacil-04-fe-wallet.md`](docs/development/DEV-PagoFacil-04-fe-wallet.md) | Feature wallet · dashboard · depósito/retiro/transferencia · saldo en tiempo real · historial paginado · idempotencyKey automático · polling de estado de saga |
+| [`DEV-PagoFacil-04-fe-audit.md`](docs/development/DEV-PagoFacil-04-fe-audit.md) | Feature audit · búsqueda de transacciones · resolución de alertas · disparo/descarga de reportes · RBAC por rol en middleware NextAuth |
+| [`DEV-PagoFacil-05-tests.md`](docs/development/DEV-PagoFacil-05-tests.md) | Pruebas de integración (saga happy path + compensada + idempotencia) · contract tests WireMock · E2E Playwright (5 flujos) · estrés k6 (500 VU) · carga sostenida k6 (15 min) |
+| [`DEV-PagoFacil-06-reporting-serverless.md`](docs/development/DEV-PagoFacil-06-reporting-serverless.md) | Lambdas Python (PDF/XLS/CSV) · Lambda Kafka Consumer · EventBridge bus + 3 rules · Terraform floci · pytest con S3 y EventBridge de LocalStack |
+
+**Esfuerzo total estimado:** ~57 días-persona. Orden de implementación: infra → BDs → scaffold → CI/CD → identity → wallet → fraud → notification → projection → audit → integration → MS1 → MS2 → frontend → serverless.
 
 ---
 
@@ -340,7 +386,7 @@ Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requiremen
 - **Security by Design** y **Privacy by Design** desde las etapas iniciales de arquitectura.
 - **Arquitectura hexagonal / puertos y adaptadores** para separar lógica de negocio de infraestructura y facilitar pruebas automatizadas.
 - **Event-driven architecture** con bus de eventos para procesamiento asíncrono, trazabilidad y desacoplamiento con sistemas externos.
-- **CQRS** — escrituras en PostgreSQL (ACID), lecturas en MongoDB (read model desnormalizado para historial, dashboard y reportería).
+- **CQRS** — escrituras en PostgreSQL (ACID), lecturas en PostgreSQL Read Model desnormalizado (`pagofacil_readmodel`, propiedad del `projection-service`) para historial, dashboard y reportería batch (ADR-002 reemplazó MongoDB por PostgreSQL para homogeneizar el motor de BD).
 - **Transactional Outbox Pattern + Saga (orquestación LRA)** para consistencia en transacciones distribuidas entre microservicios.
 - **Idempotencia** en todas las operaciones financieras: cada operación puede reintentarse de forma segura sin generar duplicados.
 - **Multitenancy / segmentación por canal** para alianzas futuras con entidades financieras.
@@ -447,3 +493,22 @@ Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requiremen
 | Esquema SQL — DDL por Bounded Context | [`docs/design/database/SDD-PagoFacil-schema.sql`](docs/design/database/SDD-PagoFacil-schema.sql) | Paso 6 — Diseño Técnico |
 | Diagrama C4 — Contexto del Sistema | [`docs/design/diagrams/SDD-PagoFacil-c4-context.mmd`](docs/design/diagrams/SDD-PagoFacil-c4-context.mmd) | Paso 6 — Diseño Técnico |
 | Diagrama C4 — Contenedores | [`docs/design/diagrams/SDD-PagoFacil-c4-container.mmd`](docs/design/diagrams/SDD-PagoFacil-c4-container.mmd) | Paso 6 — Diseño Técnico |
+| **Roadmap maestro de desarrollo** | [`docs/development/DEV-PagoFacil-roadmap.md`](docs/development/DEV-PagoFacil-roadmap.md) | Paso 7 — Plan de Desarrollo |
+| Plan — Infraestructura local (floci + K3d) | [`docs/development/DEV-PagoFacil-00-infrastructure.md`](docs/development/DEV-PagoFacil-00-infrastructure.md) | Paso 7 — Plan de Desarrollo |
+| Plan — Bases de datos y migraciones | [`docs/development/DEV-PagoFacil-01-databases.md`](docs/development/DEV-PagoFacil-01-databases.md) | Paso 7 — Plan de Desarrollo |
+| Plan — Scaffolding de proyectos | [`docs/development/DEV-PagoFacil-02-scaffold.md`](docs/development/DEV-PagoFacil-02-scaffold.md) | Paso 7 — Plan de Desarrollo |
+| Plan — Pipeline CI/CD (Jenkins + ArgoCD) | [`docs/development/DEV-PagoFacil-02b-cicd.md`](docs/development/DEV-PagoFacil-02b-cicd.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — identity-service (BC-01) | [`docs/development/DEV-PagoFacil-03-ms-identity-service.md`](docs/development/DEV-PagoFacil-03-ms-identity-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — wallet-service (BC-02) | [`docs/development/DEV-PagoFacil-03-ms-wallet-service.md`](docs/development/DEV-PagoFacil-03-ms-wallet-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — fraud-service (BC-03) | [`docs/development/DEV-PagoFacil-03-ms-fraud-service.md`](docs/development/DEV-PagoFacil-03-ms-fraud-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — notification-service (BC-04) | [`docs/development/DEV-PagoFacil-03-ms-notification-service.md`](docs/development/DEV-PagoFacil-03-ms-notification-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — audit-service (BC-05+07) | [`docs/development/DEV-PagoFacil-03-ms-audit-service.md`](docs/development/DEV-PagoFacil-03-ms-audit-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — projection-service (CQRS) | [`docs/development/DEV-PagoFacil-03-ms-projection-service.md`](docs/development/DEV-PagoFacil-03-ms-projection-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — integration-service (BC-06) | [`docs/development/DEV-PagoFacil-03-ms-integration-service.md`](docs/development/DEV-PagoFacil-03-ms-integration-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — report-extraction-service (MS1 Spark) | [`docs/development/DEV-PagoFacil-03-ms-report-extraction-service.md`](docs/development/DEV-PagoFacil-03-ms-report-extraction-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan MS — report-processing-service (MS2 Spark) | [`docs/development/DEV-PagoFacil-03-ms-report-processing-service.md`](docs/development/DEV-PagoFacil-03-ms-report-processing-service.md) | Paso 7 — Plan de Desarrollo |
+| Plan FE — feature auth | [`docs/development/DEV-PagoFacil-04-fe-auth.md`](docs/development/DEV-PagoFacil-04-fe-auth.md) | Paso 7 — Plan de Desarrollo |
+| Plan FE — feature wallet | [`docs/development/DEV-PagoFacil-04-fe-wallet.md`](docs/development/DEV-PagoFacil-04-fe-wallet.md) | Paso 7 — Plan de Desarrollo |
+| Plan FE — feature audit | [`docs/development/DEV-PagoFacil-04-fe-audit.md`](docs/development/DEV-PagoFacil-04-fe-audit.md) | Paso 7 — Plan de Desarrollo |
+| Plan — Pruebas de integración, E2E, estrés y carga | [`docs/development/DEV-PagoFacil-05-tests.md`](docs/development/DEV-PagoFacil-05-tests.md) | Paso 7 — Plan de Desarrollo |
+| Plan — Reportería serverless (Lambda + EventBridge) | [`docs/development/DEV-PagoFacil-06-reporting-serverless.md`](docs/development/DEV-PagoFacil-06-reporting-serverless.md) | Paso 7 — Plan de Desarrollo |
