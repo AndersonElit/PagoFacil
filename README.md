@@ -199,12 +199,13 @@ O sin argumentos (busca en `docs/design/` automáticamente):
 /development-plan
 ```
 
-**19 documentos generados:**
+**20 documentos generados:**
 
 | Documento | Contenido |
 |---|---|
-| [`DEV-PagoFacil-roadmap.md`](docs/development/DEV-PagoFacil-roadmap.md) | Índice maestro · mapa de microservicios · mapa de features frontend · ambiente local floci+K3d · Definition of Done con criterios TDD |
+| [`DEV-PagoFacil-roadmap.md`](docs/development/DEV-PagoFacil-roadmap.md) | Índice maestro · mapa de microservicios · mapa de features frontend · ambiente local floci+K3d · Definition of Done con criterios TDD y observabilidad |
 | [`DEV-PagoFacil-00-infrastructure.md`](docs/development/DEV-PagoFacil-00-infrastructure.md) | Scripts de infraestructura base (`base-infrastructure-builder.sh` · `init-dev-environment.sh`) · floci + K3d + SonarQube + Narayana LRA + WireMock · checklist de criterios de aceptación |
+| [`DEV-PagoFacil-0c-observability.md`](docs/development/DEV-PagoFacil-0c-observability.md) | Stack de observabilidad en K3d (`setup-observability.sh`) · Prometheus + Grafana + Jaeger + Loki + OTEL Collector · referencia de instrumentación automática del scaffold (deps Maven, `logback-spring.xml`, Helm annotations + init container OTEL) · módulo Terraform CloudWatch para staging/prod · criterios de aceptación por pilar (trazas, métricas, logs) |
 | [`DEV-PagoFacil-01-databases.md`](docs/development/DEV-PagoFacil-01-databases.md) | 7 bases de datos PostgreSQL (Database-per-Service) · changelogs Liquibase standalone por servicio · seed del catálogo de reportes (BC-07) · `init-databases.sh` + `run-liquibase-migrations.sh` |
 | [`DEV-PagoFacil-02-scaffold.md`](docs/development/DEV-PagoFacil-02-scaffold.md) | Comando completo de `scaffold-all-services.sh` con todos los parámetros · Jenkinsfiles Maven/sbt/Vercel · Dockerfiles multi-stage · Helm charts (Deployment / CronJob) · secrets floci · pasos 1-14 del scaffold |
 | [`DEV-PagoFacil-02b-cicd.md`](docs/development/DEV-PagoFacil-02b-cicd.md) | Shared Library Jenkins (11 steps) · controller K3d (`docker run` idempotente) · jobs Multibranch Pipeline · webhooks Gitea · ArgoCD ApplicationSet · `setup-cicd-pipeline.sh` autónomo en dev |
@@ -220,10 +221,10 @@ O sin argumentos (busca en `docs/design/` automáticamente):
 | [`DEV-PagoFacil-04-fe-auth.md`](docs/development/DEV-PagoFacil-04-fe-auth.md) | Feature auth · registro + MFA + recuperación de contraseña · schemas Zod · hooks TanStack Query · MSW · Playwright ATDD · NextAuth.js |
 | [`DEV-PagoFacil-04-fe-wallet.md`](docs/development/DEV-PagoFacil-04-fe-wallet.md) | Feature wallet · dashboard · depósito/retiro/transferencia · saldo en tiempo real · historial paginado · idempotencyKey automático · polling de estado de saga |
 | [`DEV-PagoFacil-04-fe-audit.md`](docs/development/DEV-PagoFacil-04-fe-audit.md) | Feature audit · búsqueda de transacciones · resolución de alertas · disparo/descarga de reportes · RBAC por rol en middleware NextAuth |
-| [`DEV-PagoFacil-05-tests.md`](docs/development/DEV-PagoFacil-05-tests.md) | Pruebas de integración (saga happy path + compensada + idempotencia) · contract tests WireMock · E2E Playwright (5 flujos) · estrés k6 (500 VU) · carga sostenida k6 (15 min) |
+| [`DEV-PagoFacil-05-tests.md`](docs/development/DEV-PagoFacil-05-tests.md) | Pruebas de integración (saga happy path + compensada + idempotencia) · contract tests WireMock · E2E Playwright (5 flujos) · estrés k6 (500 VU) · carga sostenida k6 (15 min) · **verificación E2E de observabilidad** (trazas Jaeger, métricas Prometheus, logs JSON con traceId en Loki, correlación log↔traza) |
 | [`DEV-PagoFacil-06-reporting-serverless.md`](docs/development/DEV-PagoFacil-06-reporting-serverless.md) | Lambdas Python (PDF/XLS/CSV) · Lambda Kafka Consumer · EventBridge bus + 3 rules · Terraform floci · pytest con S3 y EventBridge de LocalStack |
 
-**Esfuerzo total estimado:** ~57 días-persona. Orden de implementación: infra → BDs → scaffold → CI/CD → identity → wallet → fraud → notification → projection → audit → integration → MS1 → MS2 → frontend → serverless.
+**Esfuerzo total estimado:** ~57.5 días-persona. Orden de implementación: infra → **observabilidad** → BDs → scaffold → CI/CD → identity → wallet → fraud → notification → projection → audit → integration → MS1 → MS2 → frontend → serverless.
 
 ---
 
@@ -495,6 +496,7 @@ Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requiremen
 | Diagrama C4 — Contenedores | [`docs/design/diagrams/SDD-PagoFacil-c4-container.mmd`](docs/design/diagrams/SDD-PagoFacil-c4-container.mmd) | Paso 6 — Diseño Técnico |
 | **Roadmap maestro de desarrollo** | [`docs/development/DEV-PagoFacil-roadmap.md`](docs/development/DEV-PagoFacil-roadmap.md) | Paso 7 — Plan de Desarrollo |
 | Plan — Infraestructura local (floci + K3d) | [`docs/development/DEV-PagoFacil-00-infrastructure.md`](docs/development/DEV-PagoFacil-00-infrastructure.md) | Paso 7 — Plan de Desarrollo |
+| Plan — Stack de observabilidad (OTEL + Prometheus + CloudWatch) | [`docs/development/DEV-PagoFacil-0c-observability.md`](docs/development/DEV-PagoFacil-0c-observability.md) | Paso 7 — Plan de Desarrollo |
 | Plan — Bases de datos y migraciones | [`docs/development/DEV-PagoFacil-01-databases.md`](docs/development/DEV-PagoFacil-01-databases.md) | Paso 7 — Plan de Desarrollo |
 | Plan — Scaffolding de proyectos | [`docs/development/DEV-PagoFacil-02-scaffold.md`](docs/development/DEV-PagoFacil-02-scaffold.md) | Paso 7 — Plan de Desarrollo |
 | Plan — Pipeline CI/CD (Jenkins + ArgoCD) | [`docs/development/DEV-PagoFacil-02b-cicd.md`](docs/development/DEV-PagoFacil-02b-cicd.md) | Paso 7 — Plan de Desarrollo |
