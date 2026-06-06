@@ -110,7 +110,7 @@ Muestra los 15+ contenedores internos: servicios de dominio, integration-service
 | IaC | Terraform ≥ 1.6.0 | Restricción ADC. Módulos separados por ambiente (dev/staging/prod). |
 | Serverless | AWS Lambda + AWS EventBridge | Restricción ADC. DS-008: capa de formatos de reporte sin servicio persistente. |
 | Almacenamiento de objetos | AWS S3 | Parquet intermedio (contrato ETL entre MS1 y MS2) y reportes finales. |
-| Migraciones de BD | Flyway | Aplicadas por cada microservicio en el arranque sobre su propia BD. |
+| Migraciones de BD | Liquibase standalone (`liquibase/liquibase` Docker) | Aplicadas por `run-liquibase-migrations.sh` como paso previo al despliegue; changelogs en `db/<servicio>/changelog/` fuera del JAR. |
 | Observabilidad | Prometheus + OpenTelemetry + CloudWatch | Métricas, trazas distribuidas con CorrelationId y logs estructurados JSON. |
 | Quality Gate | SonarQube LTS Community | Cobertura ≥ 80% en módulos financieros y de seguridad. |
 | Resiliencia | Resilience4j | Circuit breakers, retry con backoff exponencial y rate limiting saliente en Camel. |
@@ -287,7 +287,7 @@ Cada microservicio de dominio sigue el template Maven de arquitectura hexagonal.
 | `infrastructure.persistence` | Repositorios R2DBC, entidades de BD, Outbox relay | Adaptador secundario — persiste estado |
 | `infrastructure.messaging` | Kafka producers, consumers, serializadores | Adaptador secundario — bus de eventos |
 | `infrastructure.client` | Clientes REST a otros microservicios (via mTLS) | Adaptador secundario — comunicación inter-servicio |
-| `infrastructure.config` | Configuración de Spring, Secrets Manager, Flyway | Configuración transversal |
+| `infrastructure.config` | Configuración de Spring, Secrets Manager | Configuración transversal |
 
 ### Módulos de integration-service
 

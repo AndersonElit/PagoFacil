@@ -26,7 +26,7 @@
 | Lenguaje backend (ETL / reportería) | Scala 2.13 + Apache Spark 3.5.1 | Mandatorio | Template `scala_hexagonal_scaffold.py` genera los microservicios de extracción y procesamiento del subsistema de reportería (batch Spark + sbt 1.9.8). |
 | Lenguaje de integración | Java 21 + Apache Camel 4.10.2 + Spring Boot 3.4.1 | Mandatorio | Template `integration_service_scaffold.py` genera el `integration-service` con Camel 4.10.2 (BOM) sobre Spring Boot 3.4.1; incluye el orquestador de saga Narayana LRA. |
 | Lenguaje frontend | TypeScript 5 + Next.js 15.3 + React 19 | Mandatorio | Template `nextjs_feature_scaffold.py` genera el proyecto frontend con Next.js 15.3, React 19 y TypeScript 5; arquitectura Feature-Based enterprise. |
-| Base de datos relacional | PostgreSQL 16.3 (AWS RDS en staging/prod; Docker `postgres:16-alpine` en dev) | Mandatorio | Módulo Terraform `rds` fija `engine_version = "16.3"`. Migraciones gestionadas por Flyway (script `scaffold-all-services.sh`). |
+| Base de datos relacional | PostgreSQL 16.3 (AWS RDS en staging/prod; Docker `postgres:16-alpine` en dev) | Mandatorio | Módulo Terraform `rds` fija `engine_version = "16.3"`. Migraciones gestionadas por **Liquibase standalone** (`run-liquibase-migrations.sh`); changelogs en `db/<servicio>/changelog/` (fuera del JAR — Flyway requiere JDBC bloqueante, incompatible con el stack R2DBC). |
 | Base de datos no relacional | MongoDB 7 (EC2 + EBS en staging/prod; Docker `mongo:7` en dev) | Mandatorio | Script `base-infrastructure-builder.sh` levanta `mongo:7`; módulo Terraform `mongodb` usa imagen 7.0. Rol: read model CQRS y auditoría. |
 | Mensajería / eventos | Apache Kafka 3.7.0 (AWS MSK en staging/prod; Docker `apache/kafka:3.7.0` KRaft en dev) | Mandatorio | Script levanta Kafka en modo KRaft sin ZooKeeper. Módulo Terraform `msk` para staging/prod. Topics `report.extracted` y `report.processed` provisionados automáticamente. |
 | Capa de integración / saga | Apache Camel 4.10.2 + Narayana LRA (coordinador de saga) | Mandatorio | `integration-service` centraliza rutas Camel y el orquestador Saga EIP/LRA. WireMock 3.9.1 para contract tests de rutas de salida. |
@@ -78,7 +78,7 @@
 - **Justificación:** El SRS §2 describe explícitamente "arquitectura de microservicios event-driven desplegada en contenedores (Kubernetes)". Los scripts y templates implementan este estilo: cada microservicio es un proyecto Maven/Spring Boot independiente con su propia base de datos (Database-per-Service), despliegue y escalamiento autónomos (RNF-009).
 - **Patrón de integración entre componentes:** Mixto — mensajería asíncrona (Kafka, `at-least-once`) para eventos de dominio; REST/HTTP con TLS para operaciones síncronas; gRPC disponible como opción en comunicaciones inter-servicio.
 - **Patrón de acceso a datos:** CQRS — escrituras en PostgreSQL (operaciones financieras con garantías ACID); lecturas en MongoDB (read model desnormalizado para historial, reportería y auditoría).
-- **BD de escritura (command):** PostgreSQL 16.3 — datos operacionales normalizados, transacciones ACID, migraciones Flyway.
+- **BD de escritura (command):** PostgreSQL 16.3 — datos operacionales normalizados, transacciones ACID, migraciones Liquibase standalone.
 - **BD de lectura (query/read model):** MongoDB 7 — documentos desnormalizados para consultas de historial, dashboard de auditoría y fuente del ETL de reportería.
 - **Sincronización command → query:** Transactional Outbox Pattern (RNF-005) + Kafka (`at-least-once`); los consumidores implementan idempotencia (RF-011, RNF-008).
 

@@ -6,9 +6,9 @@
 --
 -- IMPORTANTE: Este archivo es el artefacto de diseño unificado.
 -- En producción cada bloque BC-XX es propiedad de su servicio:
---   scaffold-all-services.sh lo extrae a V1__initial_schema.sql
---   de cada servicio, aplicado por Flyway sobre su BD propia
---   (<prefijo>_<svc_slug>).
+--   scaffold-all-services.sh lo extrae a db/<servicio>/changelog/00001_initial_schema.yaml
+--   de cada servicio, aplicado por Liquibase standalone (run-liquibase-migrations.sh)
+--   sobre su BD propia (<prefijo>_<svc_slug>).
 -- No existe un schema global compartido en producción.
 -- ============================================================
 

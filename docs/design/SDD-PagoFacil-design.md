@@ -54,11 +54,11 @@ Modelo de datos: [SDD-PagoFacil-schema.sql](database/SDD-PagoFacil-schema.sql)
 
 **Database-per-Service** (DS-002): cada microservicio es propietario exclusivo de su base de datos. Ningún otro servicio accede directamente a ella. La comunicación de datos entre contextos ocurre únicamente mediante eventos Kafka o llamadas REST al servicio propietario.
 
-Las bases de datos se provisionan automáticamente por `init-databases.sh` con la convención `pagofacil_<svc_slug>`. El esquema inicial de cada servicio lo aplica Flyway en el arranque (`V1__initial_schema.sql`), nunca un script global.
+Las bases de datos se provisionan automáticamente por `init-databases.sh` con la convención `pagofacil_<svc_slug>`. El esquema inicial de cada servicio lo aplica **Liquibase standalone** (`run-liquibase-migrations.sh`) como paso previo al despliegue (`db/<servicio>/changelog/00001_initial_schema.yaml`), nunca un script global.
 
 **CQRS** (DS-003 / DS-CQRS-1): el lado write usa PostgreSQL 16.3 con modelo normalizado y garantías ACID. El lado read (`pagofacil_readmodel`) es un Read Model PostgreSQL desnormalizado, propiedad exclusiva del `projection-service`.
 
-**Migraciones:** Flyway gestiona el esquema de cada servicio de forma independiente. El archivo `SDD-PagoFacil-schema.sql` es el artefacto de diseño de referencia; en producción no existe un schema global compartido.
+**Migraciones:** **Liquibase standalone** gestiona el esquema de cada servicio de forma independiente mediante `run-liquibase-migrations.sh` (imagen Docker `liquibase/liquibase`, sin dependencias en el JAR). El archivo `SDD-PagoFacil-schema.sql` es el artefacto de diseño de referencia; en producción no existe un schema global compartido.
 
 ### Entidades Principales por Bounded Context
 

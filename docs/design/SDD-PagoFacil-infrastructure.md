@@ -45,7 +45,7 @@ Este script genera el árbol Terraform multi-ambiente (`dev` / `staging` / `prod
 
 - **Blue/Green deployment** para servicios de dominio en staging/prod, gestionado por ArgoCD.
 - **CronJob K8s** para MS1 y MS2: schedule configurable por ambiente vía `--schedule "<cron>"`. ArgoCD sincroniza el CronJob. Jenkins termina en `bumpImageTag`; no ejecuta smoke tests HTTP (los jobs no exponen endpoints).
-- Los microservicios de dominio están configurados con `readinessProbe` y `livenessProbe`. Flyway se ejecuta como `initContainer` antes del arranque del pod.
+- Los microservicios de dominio están configurados con `readinessProbe` y `livenessProbe`. Las migraciones Liquibase se ejecutan como paso previo al despliegue (`run-liquibase-migrations.sh`), no como `initContainer` — el servicio arranca con el esquema ya aplicado.
 
 ---
 
@@ -123,7 +123,7 @@ Este script genera el árbol Terraform multi-ambiente (`dev` / `staging` / `prod
 ### Mantenibilidad
 
 - Arquitectura hexagonal por servicio: el dominio no depende de infraestructura; los adapters son intercambiables.
-- Flyway gestiona migraciones independientes por servicio.
+- Liquibase standalone gestiona migraciones independientes por servicio (`db/<servicio>/changelog/`, fuera del JAR).
 - Cobertura de tests ≥ 80% en módulos financieros y de seguridad (SonarQube quality gate).
 - ADRs documentados en este archivo para traceabilidad de decisiones.
 
@@ -140,7 +140,7 @@ Este script genera el árbol Terraform multi-ambiente (`dev` / `staging` / `prod
 ### ADR-001 — Database-per-Service con PostgreSQL 16.3
 
 **Decisión:**  
-Cada microservicio es propietario exclusivo de su base de datos PostgreSQL (`pagofacil_<svc_slug>`). Ningún otro servicio accede directamente a ella. La comunicación de datos entre contextos usa eventos Kafka o REST al servicio propietario. Las BDs se provisionan por `init-databases.sh`; el esquema lo aplica Flyway en el arranque.
+Cada microservicio es propietario exclusivo de su base de datos PostgreSQL (`pagofacil_<svc_slug>`). Ningún otro servicio accede directamente a ella. La comunicación de datos entre contextos usa eventos Kafka o REST al servicio propietario. Las BDs se provisionan por `init-databases.sh`; el esquema lo aplica Liquibase standalone (`run-liquibase-migrations.sh`) como paso previo al despliegue.
 
 **Razón:**  
 Garantiza autonomía completa de datos por bounded context: evolución de esquema independiente, despliegue independiente, aislamiento de fallos de infraestructura. Consecuencia natural de DS-002 y DS-001.
