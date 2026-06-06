@@ -7,19 +7,20 @@
 
 ## 1. Objetivo
 
-Implementar la capa final del pipeline de reportería: las lambdas que convierten el Parquet procesado por MS2 en archivos descargables (PDF, XLS, CSV) y los depositan en S3 `pagofacil-reports/`. La arquitectura usa EventBridge como bus de enrutamiento entre MS2 y las lambdas de formato.
+Implementar la capa final del pipeline de reportería: las lambdas que convierten el Parquet procesado por MS2 en archivos descargables (PDF, XLS, CSV) y los depositan en S3 `pagofacil-reports/output/<formato>/`. La arquitectura usa EventBridge como bus de enrutamiento entre MS2 y las lambdas de formato.
 
 **Flujo completo:**
 
 ```
 MS2 publica report.processed (Kafka)
     → Lambda Kafka Consumer (Python) lee el evento
-    → Publica a EventBridge (pagofacil-report-bus) con detail-type por formato solicitado
-    → EventBridge enruta:
-        - rule pdf-rule → lambda-pdf
-        - rule xls-rule → lambda-xls
-        - rule csv-rule → lambda-csv
-    → Cada lambda lee Parquet processed/ de S3 → genera archivo → deposita en S3 pagofacil-reports/
+    → Publica a EventBridge (pagofacil-report-bus) un evento ReportFormatRequested por formato
+    → EventBridge enruta por detail.format:
+        - "PDF" → lambda-pdf
+        - "XLS" → lambda-xls
+        - "CSV" → lambda-csv
+    → Cada lambda lee Parquet de S3 (processedParquetUri)
+      → genera archivo → deposita en S3 pagofacil-reports/output/<fmt>/<reportType>/<reportId>.<ext>
     → audit-service actualiza report_jobs.status = COMPLETADO con s3_key_output
 ```
 
@@ -28,9 +29,10 @@ MS2 publica report.processed (Kafka)
 ## 2. Prerrequisitos
 
 - Etapa 3i completa (MS2 publicando `report.processed`).
-- Bucket S3 `pagofacil-reports` en floci.
-- Bucket S3 `pagofacil-parquet-processed` con Parquet de prueba disponible.
-- Terraform con módulo `reporting-serverless` aplicado en dev (floci).
+- `base-infrastructure-builder.sh` ejecutado: crea `terraform/backend/modules/reporting-lambdas/`
+  y el bloque `module "reporting_lambdas"` comentado en `terraform/backend/environments/dev/main.tf`.
+- Bucket S3 `pagofacil-reports` en floci (lo crea `base-infrastructure-builder.sh`).
+- Parquet de prueba disponible bajo el prefijo `processed/` del bucket.
 
 ---
 
@@ -42,153 +44,200 @@ python3 .claude/templates/report_lambdas_scaffold.py \
   --formats pdf,xls,csv
 ```
 
-**Estructura generada:**
+El script rellena el módulo Terraform que `base-infrastructure-builder.sh` dejó vacío.
+**Toda la capa serverless vive dentro del árbol Terraform:**
 
 ```
-reporting-lambdas/
-├── lambda_kafka_consumer/
+terraform/backend/modules/reporting-lambdas/
+├── variables.tf
+├── iam.tf
+├── eventbridge.tf         # bus + lambda kafka-consumer + trigger MSK
+├── formats.tf             # lambdas pdf/xls/csv + rules + permisos
+├── outputs.tf
+├── README.md
+├── kafka-consumer/        # código fuente de la lambda consumidora
 │   ├── handler.py
-│   ├── requirements.txt
-│   └── tests/
-│       └── test_handler.py
-├── lambda_pdf/
+│   └── requirements.txt
+├── pdf/                   # código fuente de la lambda PDF
 │   ├── handler.py
-│   ├── requirements.txt
-│   └── tests/
-│       └── test_handler.py
-├── lambda_xls/
+│   └── requirements.txt
+├── xls/                   # código fuente de la lambda XLS
 │   ├── handler.py
-│   ├── requirements.txt
-│   └── tests/
-│       └── test_handler.py
-├── lambda_csv/
-│   ├── handler.py
-│   ├── requirements.txt
-│   └── tests/
-│       └── test_handler.py
-└── terraform/
-    ├── main.tf          # EventBridge bus + 3 rules + 4 lambdas
-    ├── variables.tf
-    └── outputs.tf
+│   └── requirements.txt
+└── csv/                   # código fuente de la lambda CSV
+    ├── handler.py
+    └── requirements.txt
+```
+
+Los ZIPs de despliegue se generan en tiempo de `terraform apply` mediante `archive_file`:
+
+```hcl
+data "archive_file" "kafka_consumer" {
+  type        = "zip"
+  source_dir  = "${path.module}/kafka-consumer"
+  output_path = "${path.module}/build/kafka-consumer.zip"
+}
 ```
 
 ---
 
 ## 4. Lambda Kafka Consumer
 
-**Propósito:** Consumir `report.processed` de Kafka y publicar el evento a EventBridge con `detail-type` apropiado por formato solicitado.
+**Propósito:** Consumir `report.processed` de Kafka y publicar a EventBridge un evento
+`ReportFormatRequested` por cada formato solicitado (DR-5).
 
 ```python
-# lambda_kafka_consumer/handler.py
+# kafka-consumer/handler.py (generado por el scaffold)
 
-def handler(event, context):
-    """Trigger: Kafka topic report.processed (MSK trigger en staging/prod; manual en dev)"""
-    for record in event['records']['report.processed']:
-        payload = json.loads(base64.b64decode(record['value']))
-        job_id = payload['jobId']
-        formats = payload['formats']  # ["PDF", "XLS", "CSV"]
-        s3_key_processed = payload['s3KeyProcessed']
-        
+EVENT_BUS = os.environ.get("EVENTBRIDGE_BUS", "pagofacil-report-bus")
+SOURCE = "pagofacil.reporting"
+DEFAULT_FORMATS = ["PDF", "XLS", "CSV"]
+
+def handler(event, _context=None):
+    entries = []
+    for msg in _records(event):          # soporta envelope MSK y llamada directa
+        formats = msg.get("formats") or DEFAULT_FORMATS
         for fmt in formats:
-            eventbridge.put_events(Entries=[{
-                'EventBusName': 'pagofacil-report-bus',
-                'Source': 'pagofacil.reporting',
-                'DetailType': f'ReportProcessed.{fmt}',
-                'Detail': json.dumps({
-                    'jobId': job_id,
-                    'format': fmt,
-                    's3KeyProcessed': s3_key_processed
-                })
-            }])
+            detail = {
+                "reportId":             msg.get("reportId"),
+                "reportType":           msg.get("reportType"),
+                "processedParquetUri":  msg.get("processedParquetUri"),
+                "format":               fmt.upper(),
+            }
+            entries.append({
+                "Source":      SOURCE,
+                "DetailType":  "ReportFormatRequested",
+                "Detail":      json.dumps(detail),
+                "EventBusName": EVENT_BUS,
+            })
+    if entries:
+        events.put_events(Entries=entries)
+    return {"published": len(entries)}
 ```
 
 ---
 
 ## 5. Lambdas de Formato
 
+Cada lambda recibe el evento de EventBridge, lee el Parquet desde `processedParquetUri`
+vía pyarrow y escribe el archivo resultante en `output/<fmt>/<reportType>/<reportId>.<ext>`.
+
 ### lambda-pdf
 
 ```python
-# lambda_pdf/handler.py
-import pandas as pd
+# pdf/handler.py (generado por el scaffold)
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Table
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib import colors
 
-def handler(event, context):
-    detail = event['detail']
-    df = pd.read_parquet(f"s3://pagofacil-parquet-processed/{detail['s3KeyProcessed']}")
-    pdf_key = f"reports/{detail['jobId']}/report.pdf"
-    # ... generar PDF con ReportLab
-    s3.upload_fileobj(pdf_buffer, 'pagofacil-reports', pdf_key)
-    # ... notificar audit-service vía Kafka o API que el reporte está listo
-    return {'statusCode': 200, 's3Key': pdf_key}
+def handler(event, _context=None):
+    d = event.get("detail", event)
+    table = _read_table(d["processedParquetUri"])   # pyarrow dataset sobre S3
+    # construye data[][] con cabeceras y filas
+    # genera PDF con ReportLab y sube a S3
+    key = f"output/pdf/{d['reportType']}/{d['reportId']}.pdf"
+    s3.put_object(Bucket=REPORT_BUCKET, Key=key, Body=buf.getvalue())
+    return {"output": f"s3://{REPORT_BUCKET}/{key}", "rows": table.num_rows}
 ```
 
 ### lambda-xls
 
 ```python
-# lambda_xls/handler.py
-import pandas as pd
+# xls/handler.py (generado por el scaffold)
+from openpyxl import Workbook
 
-def handler(event, context):
-    detail = event['detail']
-    df = pd.read_parquet(f"s3://pagofacil-parquet-processed/{detail['s3KeyProcessed']}")
-    xls_key = f"reports/{detail['jobId']}/report.xlsx"
-    # ... generar XLS con openpyxl (via pandas)
-    df.to_excel(xls_buffer, index=False, engine='openpyxl')
-    s3.upload_fileobj(xls_buffer, 'pagofacil-reports', xls_key)
-    return {'statusCode': 200, 's3Key': xls_key}
+def handler(event, _context=None):
+    d = event.get("detail", event)
+    table = _read_table(d["processedParquetUri"])
+    # escribe con openpyxl y sube a S3
+    key = f"output/xls/{d['reportType']}/{d['reportId']}.xlsx"
+    s3.put_object(Bucket=REPORT_BUCKET, Key=key, Body=buf.getvalue())
+    return {"output": f"s3://{REPORT_BUCKET}/{key}", "rows": table.num_rows}
 ```
 
 ### lambda-csv
 
 ```python
-# lambda_csv/handler.py
-import pandas as pd
+# csv/handler.py (generado por el scaffold)
+import csv
 
-def handler(event, context):
-    detail = event['detail']
-    df = pd.read_parquet(f"s3://pagofacil-parquet-processed/{detail['s3KeyProcessed']}")
-    csv_key = f"reports/{detail['jobId']}/report.csv"
-    df.to_csv(csv_buffer, index=False)
-    s3.upload_fileobj(csv_buffer, 'pagofacil-reports', csv_key)
-    return {'statusCode': 200, 's3Key': csv_key}
+def handler(event, _context=None):
+    d = event.get("detail", event)
+    table = _read_table(d["processedParquetUri"])
+    # escribe con csv.writer (stdlib) y sube a S3
+    key = f"output/csv/{d['reportType']}/{d['reportId']}.csv"
+    s3.put_object(Bucket=REPORT_BUCKET, Key=key, Body=buf.getvalue().encode("utf-8"))
+    return {"output": f"s3://{REPORT_BUCKET}/{key}", "rows": table.num_rows}
 ```
 
 ---
 
-## 6. Terraform (EventBridge)
+## 6. Terraform
+
+El scaffold rellena `terraform/backend/modules/reporting-lambdas/` con cuatro archivos `.tf`.
+La estructura clave generada:
 
 ```hcl
-# terraform/main.tf (simplificado)
-
+# eventbridge.tf — bus + kafka consumer + trigger MSK
 resource "aws_cloudwatch_event_bus" "report_bus" {
-  name = "pagofacil-report-bus"
+  name = "${var.org}-report-bus"
 }
 
-resource "aws_cloudwatch_event_rule" "pdf_rule" {
-  event_bus_name = aws_cloudwatch_event_bus.report_bus.name
+data "archive_file" "kafka_consumer" {
+  type        = "zip"
+  source_dir  = "${path.module}/kafka-consumer"   # código dentro del módulo
+  output_path = "${path.module}/build/kafka-consumer.zip"
+}
+
+resource "aws_lambda_function" "kafka_consumer" { ... }
+
+resource "aws_lambda_event_source_mapping" "kafka_consumer" {
+  topics            = [var.kafka_topic]
+  starting_position = "TRIM_HORIZON"
+  self_managed_event_source {
+    endpoints = { KAFKA_BOOTSTRAP_SERVERS = var.kafka_bootstrap_servers }
+  }
+}
+
+# formats.tf — una lambda + rule + permission por formato (pdf/xls/csv)
+data "archive_file" "pdf" {
+  source_dir  = "${path.module}/pdf"              # código dentro del módulo
+  output_path = "${path.module}/build/pdf.zip"
+}
+
+resource "aws_cloudwatch_event_rule" "pdf" {
   event_pattern = jsonencode({
-    "source": ["pagofacil.reporting"],
-    "detail-type": ["ReportProcessed.PDF"]
+    "source"      = ["pagofacil.reporting"]
+    "detail-type" = ["ReportFormatRequested"]
+    "detail"      = { "format" = ["PDF"] }
   })
 }
-
-resource "aws_cloudwatch_event_target" "pdf_target" {
-  rule           = aws_cloudwatch_event_rule.pdf_rule.name
-  event_bus_name = aws_cloudwatch_event_bus.report_bus.name
-  arn            = aws_lambda_function.lambda_pdf.arn
-}
-# (repetir para xls_rule y csv_rule)
 ```
 
-**Aplicar en dev (floci):**
+**Activar el módulo y aplicar en dev (floci):**
 
 ```bash
-cd reporting-lambdas/terraform
-terraform init -backend-config="endpoint=http://localhost:4566"
-terraform apply -auto-approve
+# 1. Ejecutar el scaffold (rellena terraform/backend/modules/reporting-lambdas/)
+python3 .claude/templates/report_lambdas_scaffold.py --org pagofacil --formats pdf,xls,csv
+
+# 2. Descomentar el bloque en terraform/backend/environments/dev/main.tf:
+# module "reporting_lambdas" {
+#   source                  = "../../modules/reporting-lambdas"
+#   org                     = local.project_name
+#   kafka_topic             = "report.processed"
+#   kafka_bootstrap_servers = local.kafka_bootstrap_brokers
+#   lambda_runtime          = "python3.12"
+#   report_bucket           = "${local.project_name}-reports"
+#   aws_endpoint_url        = "http://localhost:4566"
+# }
+
+# 3. Aplicar
+cd terraform/backend/environments/dev
+terraform init
+terraform apply
 ```
+
+El mismo módulo aplica en staging/prod (AWS real): solo cambia `aws_endpoint_url` (vacío ⇒ AWS real).
 
 ---
 
@@ -200,16 +249,16 @@ terraform apply -auto-approve
 
 | Archivo de test | Escenario | Resultado esperado |
 |---|---|---|
-| `test_handler.py` | Evento Kafka con 3 formatos → `put_events` llamado 3 veces | 3 eventos publicados a EventBridge (uno por formato) |
-| `test_handler.py` | EventBridge rechaza evento (error 400) | Lambda lanza excepción; error registrado en CloudWatch |
-| `test_handler.py` | Evento Kafka con formato desconocido | Lambda loga warning y continúa sin publicar |
+| `test_handler.py` | Evento Kafka con 3 formatos → `put_events` llamado 1 vez con 3 entries | 3 eventos publicados a EventBridge (uno por formato) |
+| `test_handler.py` | Evento sin campo `formats` → usa DEFAULT_FORMATS | 3 eventos publicados (pdf, xls, csv) |
+| `test_handler.py` | Invocación directa (sin envelope MSK) | Lambda procesa el payload directamente |
 
 ### Lambda PDF
 
 | Archivo de test | Escenario | Resultado esperado |
 |---|---|---|
-| `test_handler.py` | Parquet válido en S3 floci → genera PDF → sube a `pagofacil-reports/` | Archivo PDF válido en S3; `s3Key` en response |
-| `test_handler.py` | Parquet no encontrado en S3 | Lambda retorna error 404; no crea archivo |
+| `test_handler.py` | Parquet válido en S3 floci → genera PDF → sube a `pagofacil-reports/output/pdf/` | Archivo PDF válido en S3; `output` en response |
+| `test_handler.py` | Parquet no encontrado en S3 | Lambda lanza excepción |
 
 ### Lambda XLS
 
@@ -222,28 +271,29 @@ terraform apply -auto-approve
 
 | Archivo de test | Escenario | Resultado esperado |
 |---|---|---|
-| `test_handler.py` | Parquet válido → CSV con separador coma → sube a S3 | CSV parseable con pandas |
+| `test_handler.py` | Parquet válido → CSV con separador coma → sube a S3 | CSV parseable |
 | `test_handler.py` | Verificar encoding UTF-8 en CSV | Caracteres especiales correctamente codificados |
 
 ### Enrutamiento EventBridge
 
 | Archivo de test | Escenario | Resultado esperado |
 |---|---|---|
-| `test_eventbridge_routing.py` | Evento `detail-type: ReportProcessed.PDF` → activa `pdf_rule` | Solo `lambda-pdf` invocada |
-| `test_eventbridge_routing.py` | Evento `detail-type: ReportProcessed.XLS` → activa `xls_rule` | Solo `lambda-xls` invocada |
-| `test_eventbridge_routing.py` | Evento `detail-type: ReportProcessed.CSV` → activa `csv_rule` | Solo `lambda-csv` invocada |
+| `test_eventbridge_routing.py` | Evento con `detail.format = "PDF"` → activa rule pdf | Solo `lambda-pdf` invocada |
+| `test_eventbridge_routing.py` | Evento con `detail.format = "XLS"` → activa rule xls | Solo `lambda-xls` invocada |
+| `test_eventbridge_routing.py` | Evento con `detail.format = "CSV"` → activa rule csv | Solo `lambda-csv` invocada |
 
 ---
 
 ## 8. Criterios de Aceptación
 
+- [ ] `report_lambdas_scaffold.py` ejecutado: `terraform/backend/modules/reporting-lambdas/` poblado con `.tf` y código fuente de lambdas.
+- [ ] Bloque `module "reporting_lambdas"` descomentado en `terraform/backend/environments/dev/main.tf`.
+- [ ] `terraform apply` en dev crea el bus `pagofacil-report-bus`, 4 lambdas y 3 rules en floci EventBridge.
 - [ ] Cada lambda tuvo su prueba escrita primero (Red) y luego pasó (Green).
-- [ ] `pytest reporting-lambdas/` pasa en verde.
-- [ ] Terraform apply en dev crea el bus `pagofacil-report-bus` y las 3 rules en floci EventBridge.
-- [ ] El enrutamiento de EventBridge activa la lambda correcta según `detail-type`.
-- [ ] Lambda-pdf genera PDF válido y lo deposita en `pagofacil-reports/<jobId>/report.pdf`.
-- [ ] Lambda-xls genera XLSX válido y lo deposita en `pagofacil-reports/<jobId>/report.xlsx`.
-- [ ] Lambda-csv genera CSV UTF-8 válido y lo deposita en `pagofacil-reports/<jobId>/report.csv`.
-- [ ] Flujo E2E completo: MS2 publica `report.processed` → 3 archivos en S3 `pagofacil-reports/` (verificado en Etapa 5, Sección 4).
+- [ ] El enrutamiento de EventBridge activa la lambda correcta según `detail.format`.
+- [ ] Lambda-pdf genera PDF válido en `pagofacil-reports/output/pdf/<reportType>/<reportId>.pdf`.
+- [ ] Lambda-xls genera XLSX válido en `pagofacil-reports/output/xls/<reportType>/<reportId>.xlsx`.
+- [ ] Lambda-csv genera CSV UTF-8 válido en `pagofacil-reports/output/csv/<reportType>/<reportId>.csv`.
+- [ ] Flujo E2E completo: MS2 publica `report.processed` → 3 archivos en S3 `pagofacil-reports/output/`.
 - [ ] `audit-service` actualiza `report_jobs.status = COMPLETADO` con las S3 keys de los 3 formatos.
 - [ ] `GET /v1/audit/reports/{reportId}/download` retorna URL pre-firmada para el formato solicitado.
