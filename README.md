@@ -4,6 +4,123 @@ Plataforma de billetera digital segura, escalable y de alta disponibilidad para 
 
 ---
 
+## Proceso SDLC
+
+El proyecto sigue un ciclo de vida de desarrollo de software (SDLC) guiado por skills de Claude Code. Cada etapa produce un artefacto documentado que sirve de entrada a la siguiente.
+
+---
+
+### Paso 1 — Requerimiento del Cliente
+
+**Objetivo:** Capturar la visión del proyecto, el problema de negocio, objetivos, alcance y restricciones en un formato estructurado que alimenta la etapa de Planeación.
+
+| Campo | Detalle |
+|---|---|
+| Formato base | [`.claude/formatos/input-template.md`](.claude/formatos/input-template.md) |
+| Documento generado | [`requerimiento/input-pagofacil.md`](requerimiento/input-pagofacil.md) |
+| Acción | Diligenciar el template con la información del cliente y del proyecto |
+
+**Cómo replicarlo:**
+
+1. Copiar `.claude/formatos/input-template.md` a `requerimiento/input-<proyecto>.md`.
+2. Completar todos los campos obligatorios (`*`): identificación, problema de negocio, objetivos, alcance, stakeholders, requerimientos de alto nivel, supuestos, restricciones y riesgos.
+3. El documento resultante se usa como entrada directa en el Paso 2.
+
+---
+
+### Paso 2 — Planeación (PID)
+
+**Objetivo:** Formalizar el inicio del proyecto generando un Project Initiation Document (PID) profesional con cronograma de alto nivel, criterios de éxito y análisis de riesgos.
+
+| Campo | Detalle |
+|---|---|
+| Skill | `/plan-pid` |
+| Input | [`requerimiento/input-pagofacil.md`](requerimiento/input-pagofacil.md) |
+| Documento generado | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) |
+| Commit de referencia | `e95cdee` — Ejecutar etapa SDLC - planeacion |
+
+**Cómo replicarlo:**
+
+```
+/plan-pid [contenido de requerimiento/input-pagofacil.md]
+```
+
+---
+
+### Paso 3 — Análisis de Requerimientos (SRS)
+
+**Objetivo:** Generar la especificación completa de requerimientos funcionales, no funcionales, reglas de negocio y casos de uso a partir del PID.
+
+| Campo | Detalle |
+|---|---|
+| Skill | `/requirements-srs` |
+| Input | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) |
+| Documento generado | [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) |
+| Commit de referencia | `bd793e5` — ejecutar etapa SDLC - Analisis de requerimiento |
+
+**Cómo replicarlo:**
+
+```
+/requirements-srs docs/planning/PID-PagoFacil.md
+```
+
+O sin argumentos (busca el PID en `docs/planning/` automáticamente):
+
+```
+/requirements-srs
+```
+
+---
+
+### Paso 4 — Contexto Arquitectónico (ADC)
+
+**Objetivo:** Capturar el stack tecnológico, drivers arquitectónicos, restricciones organizacionales, SLAs e integraciones en un documento que enriquece las decisiones del diseño estratégico. El ADC se deriva de los scripts e templates del proyecto y del SRS.
+
+| Campo | Detalle |
+|---|---|
+| Formato base | [`.claude/formatos/input-adc-template.md`](.claude/formatos/input-adc-template.md) |
+| Fuentes consultadas | [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) · [`.claude/scripts/`](.claude/scripts/) · [`.claude/templates/`](.claude/templates/) |
+| Documento generado | [`docs/planning/ADC-PagoFacil.md`](docs/planning/ADC-PagoFacil.md) |
+
+**Cómo replicarlo:**
+
+1. Copiar `.claude/formatos/input-adc-template.md` a `docs/planning/ADC-<proyecto>.md`.
+2. Diligenciar cada sección apoyándose en el SRS y en los scripts/templates del proyecto (el stack se infiere de `.claude/scripts/` y `.claude/templates/`).
+3. El documento resultante se usa como entrada junto al SRS en el Paso 5.
+
+**Stack tecnológico inferido** (resumen):
+
+| Capa | Tecnología |
+|---|---|
+| Backend (dominio) | Java 21 + Spring Boot 3.4.1 WebFlux — Arquitectura Hexagonal |
+| Backend (ETL/reportería) | Scala 2.13 + Apache Spark 3.5.1 |
+| Integración / Saga | Apache Camel 4.10.2 + Narayana LRA |
+| Frontend | Next.js 15.3 + TypeScript 5 + React 19 |
+| BD operacional (command) | PostgreSQL 16.3 (CQRS write side) |
+| BD read model / auditoría | MongoDB 7 (CQRS read side) |
+| Mensajería | Apache Kafka 3.7.0 (KRaft) |
+| Identidad / Auth | AWS Cognito — OAuth 2.0 / OpenID Connect |
+| Secrets | AWS Secrets Manager |
+| Contenedores | Docker + Kubernetes (K3d dev / EKS prod) |
+| IaC | Terraform ≥ 1.6.0 |
+| CI/CD | Jenkins (EC2) + ArgoCD (GitOps) + Gitea |
+| Frontend hosting | Vercel |
+| Reportería serverless | AWS Lambda + EventBridge + S3 |
+| Observabilidad | OpenTelemetry + Prometheus + CloudWatch |
+| Calidad de código | SonarQube LTS Community |
+
+---
+
+### Próximas etapas
+
+| Etapa | Skill | Input | Output |
+|---|---|---|---|
+| **Paso 5** — Diseño Estratégico | `/strategic-design-sdd` | `SRS-PagoFacil.md` + `ADC-PagoFacil.md` | `docs/strategic-design/SDD-PagoFacil.md` |
+| **Paso 6** — Diseño Técnico | `/technical-design-sdd` | `docs/strategic-design/` | `docs/design/SDD-Tecnico-PagoFacil.md` |
+| **Paso 7** — Implementación | `/development-plan` | `docs/design/` | Roadmap maestro + planes por etapa |
+
+---
+
 ## Descripción del proyecto
 
 | Campo | Detalle |
@@ -163,10 +280,11 @@ Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requiremen
 - **Security by Design** y **Privacy by Design** desde las etapas iniciales de arquitectura.
 - **Arquitectura hexagonal / puertos y adaptadores** para separar lógica de negocio de infraestructura y facilitar pruebas automatizadas.
 - **Event-driven architecture** con bus de eventos para procesamiento asíncrono, trazabilidad y desacoplamiento con sistemas externos.
+- **CQRS** — escrituras en PostgreSQL (ACID), lecturas en MongoDB (read model desnormalizado para historial, dashboard y reportería).
+- **Transactional Outbox Pattern + Saga (orquestación LRA)** para consistencia en transacciones distribuidas entre microservicios.
 - **Idempotencia** en todas las operaciones financieras: cada operación puede reintentarse de forma segura sin generar duplicados.
 - **Multitenancy / segmentación por canal** para alianzas futuras con entidades financieras.
-- **Dashboard de auditoría** para revisión de transacciones, reportes regulatorios y gestión de alertas de fraude.
-- Despliegue en nube pública con contenedores (**Kubernetes**).
+- Despliegue en nube pública con contenedores (**Kubernetes**), GitOps con **ArgoCD** y CI/CD con **Jenkins**.
 
 ---
 
@@ -255,6 +373,7 @@ Especificación completa: [`docs/requirements/SRS-PagoFacil.md`](docs/requiremen
 
 | Documento | Ruta | Etapa SDLC |
 |---|---|---|
-| Input del proyecto | [`requerimiento/input-pagofacil.md`](requerimiento/input-pagofacil.md) | Planeación |
-| Project Initiation Document (PID) | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) | Planeación |
-| Software Requirements Specification (SRS) | [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) | Análisis de Requerimientos |
+| Requerimiento del cliente (input) | [`requerimiento/input-pagofacil.md`](requerimiento/input-pagofacil.md) | Paso 1 — Requerimiento |
+| Project Initiation Document (PID) | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) | Paso 2 — Planeación |
+| Software Requirements Specification (SRS) | [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) | Paso 3 — Análisis de Requerimientos |
+| Architectural Decision Context (ADC) | [`docs/planning/ADC-PagoFacil.md`](docs/planning/ADC-PagoFacil.md) | Paso 4 — Contexto Arquitectónico |
