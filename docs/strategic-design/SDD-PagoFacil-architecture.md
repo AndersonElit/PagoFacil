@@ -31,7 +31,7 @@ Las siguientes restricciones son fijas y no negociables, derivadas del ADC:
 - **Lenguaje backend (ETL / reportería):** Scala 2.13 + Apache Spark 3.5.1. Template `scala_hexagonal_scaffold.py`.
 - **Lenguaje de integración / saga:** Java 21 + Apache Camel 4.10.2 + Narayana LRA. Template `integration_service_scaffold.py`.
 - **Frontend:** TypeScript 5 + Next.js 15.3 + React 19. Desplegado exclusivamente en Vercel; Jenkins es el único disparador de despliegues.
-- **Bases de datos:** PostgreSQL 16.3 (escritura ACID) + MongoDB 7 (read model / auditoría). No se permiten otras bases de datos en esta fase.
+- **Bases de datos:** PostgreSQL 16.3 exclusivamente — escritura ACID (por servicio) + Read Model CQRS `pagofacil_readmodel`. **Override ADR-002:** MongoDB 7 fue reemplazado por PostgreSQL para el Read Model en el Diseño Técnico. No se permiten otras bases de datos en esta fase.
 - **Mensajería:** Apache Kafka 3.7.0 (modo KRaft). No se permiten otras plataformas de mensajería.
 - **Identidad y autenticación:** AWS Cognito + OAuth 2.0 / OpenID Connect. No se permiten esquemas propietarios.
 - **API Gateway:** AWS API Gateway v2 (HTTP).
@@ -50,7 +50,7 @@ Las siguientes restricciones son fijas y no negociables, derivadas del ADC:
 
 - **Logging:** Estructurado en JSON con CorrelationId obligatorio en cada entrada. Sin datos PII en texto libre. Retención mínima 5 años para operaciones financieras.
 - **Trazas distribuidas:** OpenTelemetry en todos los microservicios. El CorrelationId propaga la traza entre servicios.
-- **Métricas:** Prometheus en todos los microservicios. CloudWatch para logs de MongoDB y Jenkins en staging/prod.
+- **Métricas:** Prometheus en todos los microservicios. CloudWatch para logs de RDS PostgreSQL y Jenkins en staging/prod.
 - **Seguridad:** mTLS inter-servicio. JWT validado en API Gateway. Secretos en Secrets Manager. TLS 1.2+ en tránsito externo. AES-256 en reposo.
 - **Idempotencia:** Todos los consumers Kafka y endpoints de operaciones financieras implementan idempotencia. Idempotency Key por operación.
 - **Resiliencia:** Circuit breakers para dependencias externas. Reintentos con backoff exponencial. Timeouts configurables. Degradación controlada.
@@ -95,9 +95,9 @@ Las siguientes restricciones son fijas y no negociables, derivadas del ADC:
 
 **Contexto:** El sistema tiene patrones de acceso radicalmente distintos: escrituras financieras con garantías ACID (baja concurrencia, alta consistencia) y lecturas de historial, dashboard y reportería (alta concurrencia, consistencia eventual aceptable).
 
-**Decisión:** Las escrituras operacionales se realizan en PostgreSQL 16.3 (modelo normalizado, ACID). Las lecturas de historial, dashboard de auditoría y reportería se realizan sobre un Read Model desnormalizado en MongoDB 7. La sincronización entre ambos modelos ocurre mediante el Transactional Outbox Pattern + Kafka, procesados por un Projection Service dedicado.
+**Decisión:** Las escrituras operacionales se realizan en PostgreSQL 16.3 (modelo normalizado, ACID). Las lecturas de historial, dashboard de auditoría y reportería se realizan sobre un Read Model desnormalizado en PostgreSQL 16.3 (`pagofacil_readmodel`). La sincronización entre ambos modelos ocurre mediante el Transactional Outbox Pattern + Kafka, procesados por un Projection Service dedicado.
 
-**Justificación:** PostgreSQL provee las garantías ACID necesarias para las operaciones financieras críticas. MongoDB provee el modelo de documento desnormalizado óptimo para consultas de historial paginadas, dashboard de auditoría y extracción ETL de reportería, sin afectar el rendimiento del modelo de escritura.
+**Justificación:** PostgreSQL provee las garantías ACID necesarias para las operaciones financieras críticas y el modelo tabular desnormalizado es óptimo para consultas de historial paginadas, dashboard de auditoría y extracción ETL de reportería vía JDBC, sin afectar el rendimiento del modelo de escritura. **Override ADR-002 (Diseño Técnico):** la decisión original de este SDD definía MongoDB 7 como Read Model; fue reemplazada por PostgreSQL 16.3 para homogeneizar el motor de BD en toda la plataforma y eliminar la complejidad operacional de un segundo motor.
 
 **Consecuencias:** El Read Model refleja el estado con latencia proporcional al throughput de Kafka (consistencia eventual). Las consultas de historial y dashboard pueden mostrar un estado levemente desfasado respecto a la escritura. Este tradeoff es aceptable para estos casos de uso.
 
@@ -145,11 +145,11 @@ Las siguientes restricciones son fijas y no negociables, derivadas del ADC:
 
 ### DS-007 — ETL Spark de Dos Etapas para Reportería
 
-**Contexto:** El sistema requiere generación de reportes regulatorios y operacionales (RF-017, RF-015) en múltiples formatos (PDF, CSV, XLS) con fuentes de datos en el Read Model MongoDB. Los reportes pueden dispararse por schedule o on-demand desde el dashboard.
+**Contexto:** El sistema requiere generación de reportes regulatorios y operacionales (RF-017, RF-015) en múltiples formatos (PDF, CSV, XLS) con fuentes de datos en el Read Model PostgreSQL. Los reportes pueden dispararse por schedule o on-demand desde el dashboard.
 
 **Decisión:** El subsistema de reportería implementa un pipeline ETL de dos etapas con jobs Spark batch:
 
-- **MS1 (`report-extraction-service`, Scala + Spark):** Extrae datos del Read Model MongoDB usando el ReportSchema declarado en `report_schema_catalog`. Valida el esquema y genera un archivo Parquet en S3 como contrato de salida. Publica evento `ReporteExtraido` a Kafka.
+- **MS1 (`report-extraction-service`, Scala + Spark):** Extrae datos del Read Model PostgreSQL 16.3 (`pagofacil_readmodel`) vía JDBC (`SparkJdbcSourceAdapter`) usando el ReportSchema declarado en `report_schema_catalog`. Valida el esquema y genera un archivo Parquet en S3 como contrato de salida. Publica evento `ReporteExtraido` a Kafka.
 - **MS2 (`report-processing-service`, Scala + Spark):** Consume el Parquet de S3, aplica transformaciones específicas por ReportType usando el patrón Factory, y publica el resultado a S3. Emite evento `ReporteProcesado` a Kafka.
 
 MS1 y MS2 son **jobs batch ejecutados por schedule** (CronJob Kubernetes) o por evento de comando on-demand. No son servicios REST persistentes ni exponen endpoints HTTP.
@@ -184,41 +184,47 @@ MS1 y MS2 son **jobs batch ejecutados por schedule** (CronJob Kubernetes) o por 
 
 ---
 
-### DS-CQRS-1 — Segregación Write/Read: PostgreSQL como Lado Escritura, MongoDB como Read Model
+### DS-CQRS-1 — Segregación Write/Read: PostgreSQL como Lado Escritura, PostgreSQL como Read Model
 
-`[Decisión previa — no revisable]`
+`[Decisión previa — revisada por ADR-002 en Diseño Técnico]`
 
 **Contexto:** El patrón CQRS requiere modelos de datos independientes para escrituras y lecturas. Las escrituras necesitan consistencia ACID; las lecturas necesitan rendimiento y flexibilidad de consulta.
 
-**Decisión:** Cada microservicio operacional (Wallet, Identity, Fraud) escribe en su propia base de datos PostgreSQL 16.3 (Database-per-Service, lado write) con modelo normalizado y transacciones ACID. El estado que necesitan las consultas de historial, dashboard y reportería se publica como eventos de dominio en Kafka. El Read Model en MongoDB 7 es la fuente de verdad para el lado de lectura. Ningún microservicio de reportería ni de auditoría accede a las bases de datos operacionales PostgreSQL.
+**Decisión (actualizada — ADR-002):** Cada microservicio operacional (Wallet, Identity, Fraud) escribe en su propia base de datos PostgreSQL 16.3 (Database-per-Service, lado write) con modelo normalizado y transacciones ACID. El estado que necesitan las consultas de historial, dashboard y reportería se publica como eventos de dominio en Kafka. El Read Model en **PostgreSQL 16.3** (`pagofacil_readmodel`) es la fuente de verdad para el lado de lectura con tablas desnormalizadas. Ningún microservicio de reportería ni de auditoría accede a las bases de datos operacionales PostgreSQL de los servicios de dominio.
 
-**Justificación:** PostgreSQL garantiza la consistencia financiera requerida por RNF-005. MongoDB provee el modelo de documento flexible y optimizado para las consultas de historial paginadas y el acceso del ETL de reportería. La separación física garantiza que las consultas de lectura intensiva no degraden el rendimiento de las escrituras financieras.
+> **Override ADR-002:** la decisión original de este SDD definía MongoDB 7 como tecnología del Read Model. El Diseño Técnico la reemplazó por PostgreSQL 16.3 para homogeneizar el motor de BD en toda la plataforma, simplificar la operación y habilitar consultas SQL directas para el dashboard de auditoría y el ETL de reportería vía JDBC.
+
+**Justificación:** PostgreSQL garantiza la consistencia financiera requerida por RNF-005. El modelo tabular desnormalizado de PostgreSQL es óptimo para las consultas de historial paginadas y el acceso JDBC del ETL de reportería. La separación física (instancia RDS independiente) garantiza que las consultas de lectura intensiva no degraden el rendimiento de las escrituras financieras.
 
 **Consecuencias:** Consistencia eventual entre escritura y lectura — el Read Model refleja el estado con latencia proporcional al throughput de Kafka. Este lag es aceptable para historial, dashboard y reportería. No lo es para la consulta de saldo disponible en tiempo real, que debe servirse directamente desde el lado write.
 
 ---
 
-### DS-CQRS-2 — Projection Service: Construcción del Read Model en MongoDB
+### DS-CQRS-2 — Projection Service: Construcción del Read Model en PostgreSQL
 
-**Contexto:** Los eventos de dominio publicados por los microservicios operacionales en Kafka deben proyectarse hacia el Read Model en MongoDB para que estén disponibles para el dashboard de auditoría, el historial de movimientos y el ETL de reportería.
+**Contexto:** Los eventos de dominio publicados por los microservicios operacionales en Kafka deben proyectarse hacia el Read Model en PostgreSQL para que estén disponibles para el dashboard de auditoría, el historial de movimientos y el ETL de reportería.
 
-**Decisión:** Un `projection-service` dedicado (Spring Boot reactivo) consume eventos de dominio de todos los microservicios desde Kafka y construye colecciones desnormalizadas en MongoDB 7 (`pagofacil_readmodel`): `transacciones`, `alertas`, `alertas_aml`, `billeteras`, `conciliaciones`. Es el único escritor de esta base de datos. Los consumidores de lectura (Audit, Reporting) solo leen.
+**Decisión (actualizada — ADR-002):** Un `projection-service` dedicado (Spring Boot reactivo) consume eventos de dominio de todos los microservicios desde Kafka y construye tablas desnormalizadas en **PostgreSQL 16.3** (`pagofacil_readmodel`): `report_transactions`, `report_alerts`, `report_wallets`, `report_reconciliations`. Es el único escritor de esta base de datos. Los consumidores de lectura (`audit-service`, MS1 Spark) solo leen.
 
-**Justificación:** La proyección centralizada en un único servicio garantiza consistencia del Read Model, facilita el manejo de idempotencia en la proyección (clave de evento + MongoDB upsert), y simplifica el modelo de acceso de datos para los contextos consumidores.
+> **Override ADR-002:** la decisión original definía MongoDB 7 con colecciones `transacciones`, `alertas`, `alertas_aml`, `billeteras`, `conciliaciones`. Reemplazadas por tablas PostgreSQL desnormalizadas en el Diseño Técnico. La idempotencia usa UPSERT (`INSERT … ON CONFLICT DO UPDATE`) en lugar de MongoDB upsert.
+
+**Justificación:** La proyección centralizada en un único servicio garantiza consistencia del Read Model, facilita el manejo de idempotencia en la proyección (clave de evento + UPSERT PostgreSQL), y simplifica el modelo de acceso de datos para los contextos consumidores.
 
 **Consecuencias:** El `projection-service` es un componente adicional que debe ser altamente disponible para mantener el Read Model actualizado. Su retraso impacta directamente la frescura del dashboard y los reportes. Debe diseñarse para reprocessar eventos desde un offset en caso de fallo.
 
 ---
 
-### DS-CQRS-3 — Read Model MongoDB como Fuente Exclusiva del ETL de Reportería
+### DS-CQRS-3 — Read Model PostgreSQL como Fuente Exclusiva del ETL de Reportería
 
 **Contexto:** El `report-extraction-service` (MS1 Spark) necesita acceder a los datos históricos para construir los reportes. Debe existir una fuente canónica, optimizada para lectura masiva, sin impactar los sistemas operacionales.
 
-**Decisión:** MS1 lee exclusivamente del Read Model MongoDB (`pagofacil_readmodel`) usando el Spark MongoDB Connector. Queda **prohibido** que MS1 o cualquier componente del subsistema de reportería apunte directamente a las bases de datos operacionales PostgreSQL de los servicios de dominio. La fuente alternativa JDBC sobre PostgreSQL se usa únicamente como fallback de último recurso documentado operacionalmente, nunca como fuente primaria.
+**Decisión (actualizada — ADR-002):** MS1 lee exclusivamente del Read Model **PostgreSQL 16.3** (`pagofacil_readmodel`) usando **JDBC** (`SparkJdbcSourceAdapter`). Queda **prohibido** que MS1 o cualquier componente del subsistema de reportería apunte directamente a las bases de datos operacionales PostgreSQL de los servicios de dominio.
 
-**Justificación:** El Read Model MongoDB está diseñado y desnormalizado para acceso de lectura masiva. Al aislar la extracción del ETL del sistema operacional, se garantiza que los jobs Spark batch no generen presión sobre las bases de datos transaccionales, preservando los SLAs de latencia de las operaciones financieras.
+> **Override ADR-002:** la decisión original definía el Spark MongoDB Connector como mecanismo de extracción y MongoDB como fuente primaria con PostgreSQL JDBC solo como fallback. En el Diseño Técnico la fuente primaria pasó a ser PostgreSQL JDBC (`pagofacil_readmodel`) sin fallback alternativo.
 
-**Consecuencias:** La calidad de los reportes depende de la completitud y frescura del Read Model. Si el `projection-service` tiene retraso, los reportes reflejarán ese desfase. Los jobs Spark deben validar el esquema de las colecciones MongoDB antes de procesar para detectar cambios estructurales.
+**Justificación:** El Read Model PostgreSQL está desnormalizado para acceso de lectura masiva. Al aislar la extracción del ETL del sistema operacional, se garantiza que los jobs Spark batch no generen presión sobre las bases de datos transaccionales, preservando los SLAs de latencia de las operaciones financieras.
+
+**Consecuencias:** La calidad de los reportes depende de la completitud y frescura del Read Model. Si el `projection-service` tiene retraso, los reportes reflejarán ese desfase. MS1 debe validar el esquema del DataFrame extraído contra `report_schema_catalog` antes de procesar para detectar cambios estructurales.
 
 ---
 
@@ -234,7 +240,7 @@ MS1 y MS2 son **jobs batch ejecutados por schedule** (CronJob Kubernetes) o por 
 | R-004 | Complejidad operacional de Narayana LRA. Fallos en el coordinador LRA pueden dejar sagas en estado indeterminado, requiriendo intervención manual. | Media | Alto | Implementar monitoreo de sagas en estado STUCK con alerta automática. Documentar runbooks de intervención manual. Validar el comportamiento de compensación en pruebas de caos antes del lanzamiento. |
 | R-005 | Consistencia eventual del Read Model puede generar reportes desfasados en ventanas de alta carga, afectando la percepción de confiabilidad de los reportes regulatorios. | Media | Medio | Monitorear el lag de proyección como métrica de negocio. Establecer SLA interno para el lag máximo tolerable del Read Model. Documentar el comportamiento eventual para el equipo de compliance. |
 | R-006 | Aplicabilidad de PCI-DSS no confirmada por el oficial de compliance. Si aplica, puede requerir controles adicionales no planificados en el diseño actual. | Media | Alto | El oficial de compliance debe emitir dictamen sobre el nivel de PCI-DSS antes del cierre del diseño técnico. |
-| R-007 | Volúmenes de datos de auditoría y transacciones a 5+ años en MongoDB pueden requerir estrategia de archivado no planificada actualmente. | Baja | Medio | Definir estrategia de archivado (cold storage S3) durante el diseño técnico antes de comprometer el modelo de datos de MongoDB. |
+| R-007 | Volúmenes de datos de auditoría y transacciones a 5+ años en `pagofacil_readmodel` (PostgreSQL) pueden requerir estrategia de archivado no planificada actualmente. | Baja | Medio | Definir estrategia de archivado (particionamiento por fecha + cold storage S3) durante el diseño técnico antes de comprometer el esquema de `pagofacil_readmodel`. |
 
 ---
 
@@ -243,7 +249,7 @@ MS1 y MS2 son **jobs batch ejecutados por schedule** (CronJob Kubernetes) o por 
 | Tradeoff | Ganancia | Costo Aceptado |
 |----------|----------|----------------|
 | Microservicios vs. monolito modular | Escalamiento independiente por capacidad, despliegue sin downtime por componente, aislamiento de fallos | Complejidad operacional significativamente mayor (Kubernetes, Kafka, mTLS, trazabilidad distribuida, sagas) |
-| CQRS (PostgreSQL write + MongoDB read) | Rendimiento óptimo de consultas sin afectar escrituras financieras; modelo de lectura optimizado para cada caso de uso | Consistencia eventual entre escritura y lectura; lag en historial y dashboard; operación de dos tecnologías de base de datos distintas |
+| CQRS (PostgreSQL write + PostgreSQL read model) | Rendimiento óptimo de consultas sin afectar escrituras financieras; motor de BD homogéneo; SQL expresivo para ETL y dashboard; JDBC nativo en Spark | Consistencia eventual entre escritura y lectura; lag en historial y dashboard; instancia RDS adicional para el Read Model |
 | Database-per-Service | Autonomía total de cada bounded context; evolución independiente de esquemas; aislamiento de fallos de infraestructura | Ausencia de JOINs directos entre bases de datos de servicios distintos; complejidad de agregación de datos en el Read Model |
 | Saga por orquestación (vs. coreografía) | Visibilidad centralizada del estado de cada transacción distribuida; facilidad de diagnóstico y auditoría; lógica de compensación en un lugar | Acoplamiento del orquestador (`integration-service`) con todos los participantes de la saga; cuello de botella potencial si el orquestador no escala adecuadamente |
 | Reportería batch (vs. streaming) | Simplicidad operacional de jobs batch sin estado persistente; menor complejidad de infraestructura | Latencia del schedule en la disponibilidad de reportes; no apto para alertas en tiempo real (que se manejan por otro canal) |
@@ -268,21 +274,21 @@ Las decisiones estratégicas de esta etapa establecen PagoFacil como una platafo
 | Selección de las fuentes de listas de sanciones AML y su protocolo de consumo (REST / file) | Oficial de Compliance | Alta |
 | Definición del volumen inicial de usuarios activos y proyección a 12 meses para dimensionamiento de infraestructura | Equipo de negocio / Arquitectura | Alta |
 | Confirmación del período exacto de retención de datos por normativa (≥ 5 años base según RN-012) | Oficial de Compliance | Media |
-| Definición de la estrategia de archivado de datos históricos a largo plazo en MongoDB | Arquitectura / Infraestructura | Media |
+| Definición de la estrategia de archivado de datos históricos a largo plazo en `pagofacil_readmodel` (PostgreSQL) — particionamiento por fecha + cold storage S3 | Arquitectura / Infraestructura | Media |
 
 ### Próximos Pasos para el Diseño Técnico
 
 1. **Modelado de APIs internas:** Definir los contratos REST/gRPC entre microservicios para cada bounded context, incluyendo endpoints de saga del `integration-service`.
-2. **Diseño de esquemas de base de datos:** Definir el modelo de datos PostgreSQL (por servicio), el modelo de documentos MongoDB (Read Model), y la tabla `report_schema_catalog`.
+2. **Diseño de esquemas de base de datos:** Definir el modelo de datos PostgreSQL (por servicio), el esquema del Read Model PostgreSQL (`pagofacil_readmodel`) con tablas desnormalizadas, y la tabla `report_schema_catalog`.
 3. **Diseño de topics Kafka y esquemas de eventos:** Definir los topics, grupos de consumers, esquemas Avro/JSON, y estrategia de retención de mensajes.
 4. **Diseño detallado de sagas:** Especificar cada paso, su evento de compensación, y los timeouts de Narayana LRA para Saga-Deposito, Saga-Retiro y Saga-Transferencia.
 5. **Diseño de la arquitectura hexagonal por servicio:** Definir ports, adapters primarios y secundarios para cada microservicio usando el template Maven.
-6. **Diseño de la infraestructura Terraform:** Confirmar los módulos y variables para dev (K3d + Floci) y staging/prod (EKS + MSK + RDS + MongoDB EC2).
+6. **Diseño de la infraestructura Terraform:** Confirmar los módulos y variables para dev (K3d + Floci) y staging/prod (EKS + MSK + RDS PostgreSQL — incluye instancia separada para `pagofacil_readmodel`).
 7. **Definición de ADRs técnicos:** Formalizar como `ADR-xxx` las decisiones técnicas de implementación que surjan del diseño detallado.
 
 ### Dependencias y Bloqueadores
 
 - **Bloqueador crítico:** Los protocolos de integración con entidades financieras deben estar definidos antes de iniciar el diseño técnico del `integration-service`.
 - **Bloqueador crítico:** El marco KYC/AML y la aplicabilidad de PCI-DSS deben confirmarse antes de diseñar el módulo de compliance de Identity y Fraud Context.
-- **Dependencia:** La infraestructura dev (K3d + Floci + Kafka Docker + MongoDB Docker) debe estar operativa antes del inicio del desarrollo de microservicios.
+- **Dependencia:** La infraestructura dev (K3d + Floci + Kafka Docker + PostgreSQL Docker) debe estar operativa antes del inicio del desarrollo de microservicios.
 - **Dependencia:** El proveedor KYC debe estar seleccionado antes de implementar el flujo de onboarding completo.

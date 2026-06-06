@@ -133,7 +133,7 @@ El análisis de amenazas utiliza el marco STRIDE. Las amenazas están ordenadas 
 | Zona DMZ | AWS API Gateway v2 — punto único de entrada; valida tokens JWT de Cognito antes de enrutar | Bajo — Tráfico validado pero no de confianza interna |
 | Zona de Aplicación | Cluster Kubernetes (K3d en dev / EKS en staging/prod); microservicios autenticados con mTLS | Medio — Confianza basada en certificados de servicio |
 | Zona de Integración | `integration-service` — único punto de comunicación saliente con sistemas externos; aplica ACL | Medio — Controlado, pero interactúa con sistemas externos |
-| Zona de Datos | Bases de datos PostgreSQL, MongoDB; bus Kafka | Alto — Acceso restringido exclusivamente a microservicios propietarios vía mTLS |
+| Zona de Datos | Bases de datos PostgreSQL (operacionales por servicio + Read Model `pagofacil_readmodel`); bus Kafka | Alto — Acceso restringido exclusivamente a microservicios propietarios vía mTLS |
 | Zona de Secretos | AWS Secrets Manager | Crítico — Acceso controlado por IAM roles con least privilege; solo pods autorizados |
 | Zona de Identidad | AWS Cognito (User Pool) | Alto — Proveedor de identidad gestionado; fuente de verdad para tokens JWT |
 
@@ -149,9 +149,9 @@ El análisis de amenazas utiliza el marco STRIDE. Las amenazas están ordenadas 
 | Integration Service (Zona de Integración) | Entidades Financieras (Zona Pública) | Solicitudes de fondeo e instrucciones de pago | Alto | TLS 1.2+; credenciales en Secrets Manager; timeouts configurables; circuit breaker |
 | Integration Service (Zona de Integración) | Proveedor KYC (Zona Pública) | Documentos de identidad y datos personales del usuario | Alto | TLS 1.2+; cifrado de payload si el proveedor lo requiere; credenciales en Secrets Manager |
 | Integration Service (Zona de Integración) | Listas de Sanciones AML (Zona Pública) | Consultas de verificación de usuario/contraparte | Alto | TLS 1.2+; credenciales en Secrets Manager; cache local para reducir exposición de datos |
-| Microservicio (Zona de Aplicación) | PostgreSQL / MongoDB (Zona de Datos) | Datos financieros, PII, eventos de dominio | Alto | Credenciales en Secrets Manager; cifrado en reposo AES-256; acceso exclusivo del microservicio propietario |
+| Microservicio (Zona de Aplicación) | PostgreSQL (Zona de Datos) | Datos financieros, PII, eventos de dominio | Alto | Credenciales en Secrets Manager; cifrado en reposo AES-256; acceso exclusivo del microservicio propietario |
 | Microservicio (Zona de Aplicación) | Kafka (Zona de Datos) | Eventos de dominio | Medio | mTLS producer/consumer; ACL por topic; validación de esquema |
 | Microservicio (Zona de Aplicación) | AWS Secrets Manager (Zona de Secretos) | Lectura de credenciales en arranque | Medio | IAM role con least privilege; acceso acotado a los secretos del servicio propio |
-| Reporting (Zona de Aplicación) | Read Model MongoDB (Zona de Datos) | Lectura de datos para extracción ETL | Medio | Credenciales read-only; acceso exclusivo del `report-extraction-service`; prohibido acceso a BDs operacionales |
+| Reporting — MS1 Spark (Zona de Aplicación) | Read Model PostgreSQL `pagofacil_readmodel` (Zona de Datos) | Lectura de datos para extracción ETL vía JDBC | Medio | Credenciales read-only en Secrets Manager; acceso exclusivo del `report-extraction-service`; prohibido acceso a BDs operacionales de los servicios de dominio |
 | Lambda (Zona de Integración serverless) | S3 `pagofacil-reports` (Zona de Datos) | Escritura de reportes generados | Medio | IAM role con least privilege; bucket privado; acceso de lectura solo para roles autorizados |
 | Auditor (Zona Pública) | API Gateway → Audit Service | Descarga de reportes regulatorios | Medio | JWT con claim de rol Auditor/Compliance; log de acceso a reportes |

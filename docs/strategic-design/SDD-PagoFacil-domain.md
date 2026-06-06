@@ -85,7 +85,7 @@ El dominio central de PagoFacil es la **gestión segura y trazable de fondos ele
 | Lista de Sanciones | Registros OFAC, ONU u otras fuentes de personas/entidades prohibidas para operar | Integration, Fraud |
 | Outbox | Tabla auxiliar que garantiza la publicación confiable de eventos de dominio sin pérdida ante fallos | Wallet, Integration |
 | Saga | Flujo transaccional distribuido compuesto por pasos locales con eventos de compensación para garantizar consistencia eventual | Integration |
-| Read Model | Vista desnormalizada en MongoDB, optimizada para consultas de historial, dashboard y reportería | Audit, Reporting |
+| Read Model | Vista desnormalizada en PostgreSQL 16.3 (`pagofacil_readmodel`), optimizada para consultas de historial, dashboard y reportería vía SQL/JDBC | Audit, Reporting |
 | ReportSchema | Declaración de estructura (columnas, fuente, tipos) de un tipo de reporte específico | Reporting |
 | ReportType | Categoría de reporte (transacciones-diario, reporte-aml, alertas-fraude, saldo-usuarios, conciliacion) | Reporting |
 | FuenteFondos | Cuenta bancaria o instrumento de pago externo registrado y validado para fondear la billetera | Wallet |
@@ -206,11 +206,11 @@ El dominio central de PagoFacil es la **gestión segura y trazable de fondos ele
 **Entidades principales:** EntradaAuditoria, AlertaGestionada, ReporteRegulatorio
 
 **Límites:**
-- Contexto de lectura; opera sobre el Read Model (MongoDB) proyectado desde Wallet y Fraud
+- Contexto de lectura; opera sobre el Read Model PostgreSQL (`pagofacil_readmodel`) proyectado desde Wallet y Fraud
 - Los registros de auditoría son inmutables; no se permite update ni delete
 
 **Datos que posee (propietario exclusivo):**
-- Read Model MongoDB: colecciones `transacciones`, `alertas`, `alertas_aml`, `billeteras`, `conciliaciones`
+- Read Model PostgreSQL (`pagofacil_readmodel`): tablas `report_transactions`, `report_alerts`, `report_wallets`, `report_reconciliations`
 - Decisiones de auditoría sobre alertas (inmutables)
 
 ---
@@ -247,7 +247,7 @@ El dominio central de PagoFacil es la **gestión segura y trazable de fondos ele
 
 **Responsabilidades:**
 - Definición y mantenimiento del catálogo de esquemas de reporte (`report_schema_catalog`)
-- Extracción de datos desde el Read Model MongoDB (MS1 — `report-extraction-service`, Spark batch)
+- Extracción de datos desde el Read Model PostgreSQL `pagofacil_readmodel` vía JDBC (MS1 — `report-extraction-service`, Spark batch)
 - Transformación y validación por tipo de reporte (MS2 — `report-processing-service`, Spark batch)
 - Publicación de eventos `ReporteExtraido` y `ReporteProcesado` a Kafka
 - Entrega de formatos finales (PDF, XLS, CSV) mediante capa serverless Lambda + EventBridge
@@ -276,10 +276,10 @@ El dominio central de PagoFacil es la **gestión segura y trazable de fondos ele
 | Fraud | Wallet | Callback via Saga | Evento Kafka (`EvaluacionAprobada`, `TransaccionRetenida`) | Integration orquesta la coordinación |
 | Wallet | Notification | Publisher / Subscriber | Evento Kafka | Notificaciones de operaciones confirmadas/fallidas |
 | Fraud | Notification | Publisher / Subscriber | Evento Kafka (`AlertaGenerada`) | Notificación de retención a usuario y admin |
-| Wallet | Audit | Publisher → Projection | Evento Kafka → Read Model MongoDB | Projection Service proyecta estado a Read Model |
-| Fraud | Audit | Publisher → Projection | Evento Kafka → Read Model MongoDB | Alertas y resultados AML proyectados |
-| Identity | Audit | Publisher → Projection | Evento Kafka → Read Model MongoDB | Eventos de acceso y KYC proyectados |
-| Audit | Reporting | Customer / Supplier | Read Model MongoDB compartido | Reporting es conformista; lee sin escritura |
+| Wallet | Audit | Publisher → Projection | Evento Kafka → Read Model PostgreSQL | Projection Service proyecta estado a `report_transactions`, `report_wallets` |
+| Fraud | Audit | Publisher → Projection | Evento Kafka → Read Model PostgreSQL | Alertas y resultados AML proyectados en `report_alerts` |
+| Identity | Audit | Publisher → Projection | Evento Kafka → Read Model PostgreSQL | Eventos de acceso y KYC proyectados |
+| Audit | Reporting | Customer / Supplier | Read Model PostgreSQL (`pagofacil_readmodel`) compartido | Reporting es conformista; lee vía JDBC sin escritura |
 | Integration | Wallet | Orquestador / Saga | REST interno + Kafka | Coordina débito/crédito en sagas de depósito y retiro |
 | Integration | Fraud | Coordinación Saga | REST interno | Solicita evaluación de fraude en flujo de retiro |
 | Integration | Identity | Coordinación | REST interno | Transmite resultado KYC al contexto de identidad |
@@ -834,7 +834,7 @@ Todos los sistemas externos se modelan como contextos upstream. El Integration C
 ### Workflow: Generación de Reporte Regulatorio
 
 1. El CronJob K8s dispara MS1 (`report-extraction-service`) según schedule, o el auditor dispara on-demand desde el dashboard.
-2. MS1 (Spark batch) extrae datos del Read Model MongoDB usando el ReportSchema declarado.
+2. MS1 (Spark batch) extrae datos del Read Model PostgreSQL (`pagofacil_readmodel`) vía JDBC usando el ReportSchema declarado en `report_schema_catalog`.
 3. MS1 publica el archivo Parquet a S3 y emite evento `ReporteExtraido` a Kafka.
 4. MS2 (`report-processing-service`, Spark batch) consume el evento, aplica las transformaciones del ReportType usando el patrón Factory.
 5. MS2 publica el archivo procesado a S3 y emite evento `ReporteProcesado` a Kafka.
@@ -986,7 +986,7 @@ Feature: Generación de Reporte Regulatorio
   Scenario: Generación exitosa de reporte AML on-demand
     Given un auditor con acceso autorizado al dashboard de auditoría
     When el auditor solicita el reporte "reporte-aml" para el período del mes corriente
-    Then MS1 extrae los datos del Read Model MongoDB según el ReportSchema declarado
+    Then MS1 extrae los datos del Read Model PostgreSQL (`pagofacil_readmodel`) vía JDBC según el ReportSchema declarado
     And MS2 transforma los datos en el formato regulatorio requerido
     And el reporte está disponible para descarga en formato CSV
     And el reporte contiene todos los campos definidos en el esquema (fecha, usuario_id, monto, tipo_operacion, resultado_aml, lista_sancion_match, estado_revision)

@@ -27,7 +27,7 @@
 | Lenguaje de integración | Java 21 + Apache Camel 4.10.2 + Spring Boot 3.4.1 | Mandatorio | Template `integration_service_scaffold.py` genera el `integration-service` con Camel 4.10.2 (BOM) sobre Spring Boot 3.4.1; incluye el orquestador de saga Narayana LRA. |
 | Lenguaje frontend | TypeScript 5 + Next.js 15.3 + React 19 | Mandatorio | Template `nextjs_feature_scaffold.py` genera el proyecto frontend con Next.js 15.3, React 19 y TypeScript 5; arquitectura Feature-Based enterprise. |
 | Base de datos relacional | PostgreSQL 16.3 (AWS RDS en staging/prod; Docker `postgres:16-alpine` en dev) | Mandatorio | Módulo Terraform `rds` fija `engine_version = "16.3"`. Migraciones gestionadas por **Liquibase standalone** (`run-liquibase-migrations.sh`); changelogs en `db/<servicio>/changelog/` (fuera del JAR — Flyway requiere JDBC bloqueante, incompatible con el stack R2DBC). |
-| Base de datos no relacional | MongoDB 7 (EC2 + EBS en staging/prod; Docker `mongo:7` en dev) | Mandatorio | Script `base-infrastructure-builder.sh` levanta `mongo:7`; módulo Terraform `mongodb` usa imagen 7.0. Rol: read model CQRS y auditoría. |
+| Base de datos Read Model (CQRS) | PostgreSQL 16.3 — BD `pagofacil_readmodel` (propiedad exclusiva del `projection-service`) | Mandatorio | Tablas desnormalizadas `report_transactions`, `report_alerts`, `report_wallets`, `report_reconciliations`. Acceso R2DBC reactivo para escritura; JDBC Spark para extracción ETL en MS1. **Override ADR-002:** la decisión original definía MongoDB 7; reemplazada por PostgreSQL en el Diseño Técnico para homogeneizar el motor de BD en toda la plataforma. |
 | Mensajería / eventos | Apache Kafka 3.7.0 (AWS MSK en staging/prod; Docker `apache/kafka:3.7.0` KRaft en dev) | Mandatorio | Script levanta Kafka en modo KRaft sin ZooKeeper. Módulo Terraform `msk` para staging/prod. Topics `report.extracted` y `report.processed` provisionados automáticamente. |
 | Capa de integración / saga | Apache Camel 4.10.2 + Narayana LRA (coordinador de saga) | Mandatorio | `integration-service` centraliza rutas Camel y el orquestador Saga EIP/LRA. WireMock 3.9.1 para contract tests de rutas de salida. |
 | Autenticación / identidad | AWS Cognito (User Pool + JWT) — OAuth 2.0 / OpenID Connect | Mandatorio | Módulo Terraform `cognito` provisiona User Pool y App Client con tokens JWT. API Gateway valida tokens vía authorizer JWT. MFA desactivado en dev, OPTIONAL en staging/prod. |
@@ -36,10 +36,10 @@
 | Contenedores | Docker + Kubernetes (K3d en dev, AWS EKS en staging/prod) | Mandatorio | Script `base-infrastructure-builder.sh` provisiona cluster K3d con registry propio (`:5100`). Módulo Terraform `eks` para staging/prod. |
 | Registro de imágenes | AWS ECR | Mandatorio | Módulo Terraform `ecr` crea un repositorio por microservicio. K3d registry `k3d-<proyecto>-registry:5100` para dev local. |
 | CI/CD | Jenkins (controller EC2 + agentes en pods EKS) + ArgoCD (GitOps) | Mandatorio | Módulo Terraform `jenkins` y `argocd`. Módulo `jenkins-shared-library-builder.sh` configura la shared library. Gitea 1.22 como servidor Git interno para los repositorios de microservicios. |
-| Infraestructura como código | Terraform ≥ 1.6.0 (Floci en dev; AWS real en staging/prod) | Mandatorio | Estructura `terraform/backend` (módulos: eks, rds, iam, cognito, api-gateway, secrets-manager, ecr, mongodb, jenkins, msk, argocd, reporting-lambdas) y `terraform/frontend` (módulo vercel-project). |
+| Infraestructura como código | Terraform ≥ 1.6.0 (Floci en dev; AWS real en staging/prod) | Mandatorio | Estructura `terraform/backend` (módulos: eks, rds, iam, cognito, api-gateway, secrets-manager, ecr, jenkins, msk, argocd, reporting-lambdas) y `terraform/frontend` (módulo vercel-project). |
 | Frontend hosting | Vercel (provider Terraform `vercel/vercel ~> 2.0`) | Mandatorio | Módulo Terraform `vercel-project` provisiona el proyecto; `vercel.json` deshabilita despliegues automáticos de Git; Jenkins es el único disparador. |
 | Calidad de código | SonarQube LTS Community | Mandatorio | Script `base-infrastructure-builder.sh` levanta SonarQube en el stack de dev; pipeline Jenkins ejecuta `mvn sonar:sonar` como quality gate. |
-| Monitoreo / observabilidad | OpenTelemetry + Prometheus + AWS CloudWatch | Mandatorio | SRS RNF-007: logging estructurado JSON con correlationId, métricas Prometheus, trazas distribuidas OpenTelemetry. CloudWatch para logs de MongoDB y Jenkins en staging/prod. |
+| Monitoreo / observabilidad | OpenTelemetry + Prometheus + AWS CloudWatch | Mandatorio | SRS RNF-007: logging estructurado JSON con correlationId, métricas Prometheus, trazas distribuidas OpenTelemetry. CloudWatch para logs de RDS PostgreSQL y Jenkins en staging/prod. |
 | Reportería serverless | AWS Lambda + AWS EventBridge | Mandatorio | Template `report_lambdas_scaffold.py` genera las lambdas de formato (PDF/XLS/CSV). Script provisiona bus EventBridge `<proyecto>-report-bus` y bucket S3 `<proyecto>-reports`. |
 | Testing de contratos | WireMock 3.9.1 | Mandatorio | Script levanta WireMock para simular sistemas externos en integration tests de las rutas Camel. |
 | Frontend: state management | Zustand 5.0 | Mandatorio | Incluido en `package.json` del template Next.js. |
@@ -77,9 +77,9 @@
 - **Estilo principal:** Microservicios event-driven
 - **Justificación:** El SRS §2 describe explícitamente "arquitectura de microservicios event-driven desplegada en contenedores (Kubernetes)". Los scripts y templates implementan este estilo: cada microservicio es un proyecto Maven/Spring Boot independiente con su propia base de datos (Database-per-Service), despliegue y escalamiento autónomos (RNF-009).
 - **Patrón de integración entre componentes:** Mixto — mensajería asíncrona (Kafka, `at-least-once`) para eventos de dominio; REST/HTTP con TLS para operaciones síncronas; gRPC disponible como opción en comunicaciones inter-servicio.
-- **Patrón de acceso a datos:** CQRS — escrituras en PostgreSQL (operaciones financieras con garantías ACID); lecturas en MongoDB (read model desnormalizado para historial, reportería y auditoría).
+- **Patrón de acceso a datos:** CQRS — escrituras en PostgreSQL (operaciones financieras con garantías ACID); lecturas en PostgreSQL Read Model desnormalizado `pagofacil_readmodel` (historial, reportería y auditoría). **Override ADR-002:** la decisión original definía MongoDB; reemplazada por PostgreSQL en el Diseño Técnico.
 - **BD de escritura (command):** PostgreSQL 16.3 — datos operacionales normalizados, transacciones ACID, migraciones Liquibase standalone.
-- **BD de lectura (query/read model):** MongoDB 7 — documentos desnormalizados para consultas de historial, dashboard de auditoría y fuente del ETL de reportería.
+- **BD de lectura (query/read model):** PostgreSQL 16.3 (`pagofacil_readmodel`) — tablas desnormalizadas para consultas de historial, dashboard de auditoría y fuente del ETL de reportería vía JDBC Spark.
 - **Sincronización command → query:** Transactional Outbox Pattern (RNF-005) + Kafka (`at-least-once`); los consumidores implementan idempotencia (RF-011, RNF-008).
 
 ---
@@ -185,7 +185,7 @@
 
 - **Presupuesto mensual de infraestructura (cloud/servidores):** Por definir
 - **¿Existe presupuesto para licencias de software comercial?** Stack completamente open-source / managed services AWS. SonarQube Community (gratuito); Vercel (plan a definir según tráfico); Narayana LRA (open-source Red Hat). No se identifican licencias comerciales obligatorias en los templates.
-- **Restricciones de costo que afecten decisiones de diseño:** En dev se usa Floci (emulador AWS local) para minimizar costos cloud. EKS y MSK están deshabilitados en dev (`enabled=false`), sustituidos por K3d y Kafka Docker. MongoDB en dev es un contenedor local; el módulo Terraform `mongodb` (EC2 + EBS) solo aplica a staging/prod.
+- **Restricciones de costo que afecten decisiones de diseño:** En dev se usa Floci (emulador AWS local) para minimizar costos cloud. EKS y MSK están deshabilitados en dev (`enabled=false`), sustituidos por K3d y Kafka Docker. El Read Model (`pagofacil_readmodel`) corre en el mismo contenedor PostgreSQL de dev; en staging/prod es una instancia RDS independiente.
 
 ---
 
@@ -210,7 +210,7 @@
 | Lenguaje de integración / saga | Java 21 + Apache Camel 4.10.2 + Narayana LRA | Equipo de arquitectura (inferido de templates) | Anterior a 2026-06-06 |
 | Framework frontend | Next.js 15.3 + TypeScript 5 + React 19 | Equipo de arquitectura (inferido de templates) | Anterior a 2026-06-06 |
 | Base de datos operacional | PostgreSQL 16.3 | Equipo de arquitectura (módulo Terraform `rds`) | Anterior a 2026-06-06 |
-| Base de datos read model / auditoría | MongoDB 7 | Equipo de arquitectura (módulo Terraform `mongodb`) | Anterior a 2026-06-06 |
+| Base de datos read model / auditoría | ~~MongoDB 7~~ → **PostgreSQL 16.3** (`pagofacil_readmodel`) — override ADR-002 en Diseño Técnico | Equipo de arquitectura (ADR-002, 2026-06-06) | 2026-06-06 |
 | Bus de mensajería | Apache Kafka 3.7.0 (KRaft) | Equipo de arquitectura (módulo Terraform `msk`) | Anterior a 2026-06-06 |
 | Identidad y autenticación | AWS Cognito + OAuth 2.0 / OpenID Connect | Equipo de arquitectura (módulo Terraform `cognito`) | Anterior a 2026-06-06 |
 | API Gateway | AWS API Gateway v2 (HTTP) con authorizer JWT Cognito | Equipo de arquitectura (módulo Terraform `api-gateway`) | Anterior a 2026-06-06 |
@@ -229,7 +229,7 @@
 ## 13. Reportería
 
 - **¿El sistema requiere generación de reportes?** Sí — RF-017 (reportes regulatorios exportables PDF/CSV desde dashboard de auditoría) y RF-015 (reportes AML en formato regulatorio).
-- **Fuente de datos del ETL:** Read model CQRS (MongoDB 7) como fuente principal; JDBC sobre PostgreSQL como fuente alternativa cuando el read model no esté disponible.
+- **Fuente de datos del ETL:** Read model CQRS PostgreSQL 16.3 (`pagofacil_readmodel`) vía JDBC Spark (`SparkJdbcSourceAdapter`). **Override ADR-002:** la fuente original era MongoDB 7 con Spark MongoDB Connector; reemplazada por PostgreSQL JDBC en el Diseño Técnico.
 - **Disparo del ETL:** Ambos — programado/schedule (CronJob K8s, expresión configurable, default `0 * * * *`) y on-demand por evento de comando (para reportes regulatorios bajo demanda desde el dashboard de auditoría).
 - **Persistencia del catálogo de esquemas:** Tabla `report_schema_catalog` en base de datos (PostgreSQL).
 
@@ -237,21 +237,21 @@
 
 | Tipo de reporte (`reportType`) | Fuente (colección/tabla) | Columnas/esquema esperado | Formatos de salida | Frecuencia / disparo | Volumetría estimada |
 |---|---|---|---|---|---|
-| `transacciones-diario` | Colección `transacciones` (read model MongoDB) | fecha, id_operacion, tipo, monto, estado, usuario_id, correlation_id | PDF / CSV | Programado diario / on-demand | Por definir según usuarios activos |
-| `reporte-aml` | Colección `transacciones` + `alertas_aml` (read model MongoDB) | fecha, usuario_id, monto, tipo_operacion, resultado_aml, lista_sancion_match, estado_revision | CSV (formato regulatorio) | On-demand (auditor) | Por definir |
-| `alertas-fraude` | Colección `alertas` (read model MongoDB) | fecha, id_operacion, regla_disparada, severidad, estado_revision, auditor_responsable | PDF / CSV | On-demand (auditor) | Por definir |
-| `saldo-usuarios` | Colección `billeteras` (read model MongoDB) | fecha_corte, usuario_id, tenant_id, saldo_disponible, saldo_pendiente | CSV | Programado mensual | Por definir |
-| `conciliacion` | Colección `conciliaciones` (read model MongoDB) | fecha, id_operacion, monto_interno, monto_externo, discrepancia, estado | PDF / CSV | Programado diario | Por definir |
+| `transacciones-diario` | Tabla `report_transactions` (Read Model PostgreSQL) | fecha, id_operacion, tipo, monto, estado, usuario_id, correlation_id | PDF / CSV | Programado diario / on-demand | Por definir según usuarios activos |
+| `reporte-aml` | Tabla `report_transactions` + `report_alerts` (Read Model PostgreSQL) | fecha, usuario_id, monto, tipo_operacion, resultado_aml, lista_sancion_match, estado_revision | CSV (formato regulatorio) | On-demand (auditor) | Por definir |
+| `alertas-fraude` | Tabla `report_alerts` (Read Model PostgreSQL) | fecha, id_operacion, regla_disparada, severidad, estado_revision, auditor_responsable | PDF / CSV | On-demand (auditor) | Por definir |
+| `saldo-usuarios` | Tabla `report_wallets` (Read Model PostgreSQL) | fecha_corte, usuario_id, tenant_id, saldo_disponible, saldo_pendiente | CSV | Programado mensual | Por definir |
+| `conciliacion` | Tabla `report_reconciliations` (Read Model PostgreSQL) | fecha, id_operacion, monto_interno, monto_externo, discrepancia, estado | PDF / CSV | Programado diario | Por definir |
 
 ---
 
 ## 14. Información Adicional
 
 **Entorno de desarrollo local (Floci):**  
-El stack de dev usa Floci (`floci/floci:latest`) como emulador de servicios AWS (S3, MSK, EKS, Secrets Manager, ECR, Cognito, API Gateway). Las limitaciones conocidas del emulador están documentadas en los módulos Terraform con flags específicos (`var.floci`, `var.emulator`, `enable_data_plane`, `enabled`). Para servicios que Floci no soporta completamente (MongoDB, Kafka), se levantan contenedores Docker reales en la red `floci-net`.
+El stack de dev usa Floci (`floci/floci:latest`) como emulador de servicios AWS (S3, MSK, EKS, Secrets Manager, ECR, Cognito, API Gateway). Las limitaciones conocidas del emulador están documentadas en los módulos Terraform con flags específicos (`var.floci`, `var.emulator`, `enable_data_plane`, `enabled`). Para servicios que Floci no soporta completamente (Kafka, PostgreSQL), se levantan contenedores Docker reales en la red `floci-net`.
 
 **Patrón Database-per-Service:**  
-Cada microservicio tiene su propia base de datos lógica. El script `scaffold-all-services.sh` propaga los prefijos `--pg-db` y `--mongo-db` a los templates para que cada servicio derive su BD (`<prefix>_<servicio_slug>`), coherente con el script `init-databases.sh`.
+Cada microservicio tiene su propia base de datos lógica PostgreSQL. El script `scaffold-all-services.sh` recibe los prefijos `-p <pg-db>` y `-m <mongo-db>` (ambos obligatorios por la interfaz del script); en PagoFacil no existen servicios con adaptador MongoDB — el parámetro `-m` es requerido pero no creará bases de datos, ya que ningún servicio usa MongoDB (override ADR-002).
 
 **Mínimo privilegio y seguridad mTLS:**  
 Las comunicaciones inter-servicios deben usar autenticación mTLS (RNF-004). AWS Cognito provee el plano de autenticación externo; el plano interno usa certificados de servicio dentro del cluster Kubernetes.
