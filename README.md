@@ -2,19 +2,33 @@
 
 Plataforma de billetera digital segura, escalable y de alta disponibilidad para la gestión de fondos electrónicos con garantías de integridad, trazabilidad y cumplimiento regulatorio.
 
+> Documento de referencia: [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md)
+
 ---
 
 ## Descripcion del proyecto
 
-PagoFacil es un nuevo desarrollo en el dominio **Finanzas / Fintech** que provee a los usuarios una plataforma centralizada y propia para gestionar fondos electrónicos, realizar transferencias entre usuarios y consultar movimientos, eliminando la dependencia de soluciones de terceros con limitada integración y control.
+| Campo | Detalle |
+|---|---|
+| Tipo de proyecto | Nuevo desarrollo |
+| Dominio de negocio | Finanzas / Fintech |
+| Sponsor | Por definir |
+| Project Manager | Por definir |
+| Duracion estimada | ~36-46 semanas (sujeto a aprobacion tras estimacion detallada) |
+| Modalidad de despliegue | Nube publica — contenedores (Kubernetes) |
+| Metodologia | Agil con hitos por fases |
 
-### Problema que resuelve
+PagoFacil provee una plataforma centralizada y propia para gestionar fondos electrónicos, ejecutar transferencias y consultar movimientos, eliminando la dependencia de soluciones de terceros con limitada integración y control.
 
-- Ausencia de trazabilidad y auditoría transaccional completa.
-- Falta de controles antifraude integrados.
-- Dificultad para cumplir normativas KYC/AML.
+---
+
+## Problema que resuelve
+
+- Ausencia de trazabilidad y auditoría transaccional completa, dificultando conciliación y reporte regulatorio.
+- Falta de controles antifraude integrados, exponiendo la operación a pérdidas financieras y sanciones.
+- Incapacidad para cumplir normativas KYC/AML de forma sistemática y auditable.
 - Ausencia de APIs propias para integración con entidades financieras y pasarelas de pago.
-- Incapacidad de escalar horizontalmente ante incrementos de volumen de operaciones.
+- Arquitectura no escalable horizontalmente ante incrementos de volumen transaccional.
 
 ---
 
@@ -24,13 +38,16 @@ PagoFacil es un nuevo desarrollo en el dominio **Finanzas / Fintech** que provee
 
 **Específicos:**
 
-- Implementar registro, autenticación con MFA y gestión de identidad bajo estándares KYC/AML.
-- Habilitar operaciones financieras core: depósito, retiro, transferencia y consulta de saldos.
-- Garantizar integridad y no repudio de transacciones mediante identificadores únicos (UUID/correlationId) y registros auditables.
-- Implementar controles de seguridad avanzados: cifrado en tránsito y en reposo, gestión segura de credenciales y monitoreo de fraude.
-- Exponer APIs seguras para integración con entidades financieras, pasarelas de pago y sistemas externos.
-- Garantizar consistencia financiera mediante mecanismos transaccionales, procesamiento asíncrono e idempotencia.
-- Proveer capacidades de observabilidad, auditoría, recuperación ante desastres y escalamiento horizontal.
+1. Implementar registro y autenticación con MFA y gestión de identidad bajo estándares KYC/AML.
+2. Habilitar operaciones financieras core: depósito, retiro, transferencia y consulta de saldos con registro auditable.
+3. Garantizar integridad y no repudio de transacciones mediante UUID/correlationId, registros inmutables y conciliación automática.
+4. Implementar controles de seguridad: cifrado TLS 1.2+ en tránsito, AES-256 en reposo y gestión de secretos mediante vault.
+5. Exponer APIs seguras (OAuth 2.0 / OpenID Connect) para integración con entidades financieras y pasarelas de pago.
+6. Garantizar consistencia financiera con garantías ACID, procesamiento asíncrono e idempotencia.
+7. Implementar monitoreo de fraude en tiempo real con alertas y controles AML.
+8. Proveer observabilidad completa: logging estructurado, métricas y trazas distribuidas (OpenTelemetry).
+9. Alcanzar disponibilidad de 99.9% con escalamiento horizontal y plan DR (RTO < 1h, RPO < 15min).
+10. Cumplir con legislación de protección de datos personales y normativas regulatorias financieras vigentes.
 
 ---
 
@@ -40,23 +57,25 @@ PagoFacil es un nuevo desarrollo en el dominio **Finanzas / Fintech** que provee
 
 | Area | Detalle |
 |---|---|
-| Identidad | Registro y autenticación con MFA; módulo KYC y controles AML |
-| Operaciones | Depósito, retiro y transferencia entre usuarios |
-| Consultas | Saldo actual e historial auditable con paginación y filtros |
-| Seguridad | Cifrado TLS 1.2+ en tránsito, AES-256 en reposo, gestión de secretos (vault) |
+| Identidad | Registro y autenticacion con MFA; modulo KYC y controles AML |
+| Operaciones | Deposito, retiro y transferencia entre usuarios |
+| Consultas | Saldo actual e historial auditable con paginacion y filtros |
+| Seguridad | Cifrado TLS 1.2+ en transito, AES-256 en reposo, vault para secretos |
 | APIs | REST/async autenticadas (OAuth 2.0 / OpenID Connect) para integraciones externas |
-| Transacciones | Procesamiento asíncrono con idempotencia y conciliación automática |
-| Fraude | Monitoreo y detección en tiempo real; alertas ante patrones sospechosos |
-| Limites | Configurables por usuario, tipo de operación y período |
-| Observabilidad | Logging estructurado, métricas, trazas distribuidas (OpenTelemetry) y alertas |
-| Disponibilidad | Plan DR (RTO < 1h, RPO < 15min), alta disponibilidad y escalamiento horizontal |
-| Compliance | Protección de datos personales, normativas KYC/AML |
+| Transacciones | Procesamiento asincrono con idempotencia y conciliacion automatica |
+| Fraude | Monitoreo y deteccion en tiempo real; alertas ante patrones sospechosos |
+| Limites | Configurables por usuario, tipo de operacion y periodo |
+| Auditoria | Dashboard para revision de transacciones y reportes regulatorios |
+| Observabilidad | Logging estructurado, metricas, trazas distribuidas (OpenTelemetry) y alertas |
+| Disponibilidad | Alta disponibilidad, escalamiento horizontal y plan DR |
+| Compliance | Proteccion de datos personales, normativas KYC/AML |
+| Multitenancy | Segmentacion por canal de distribucion para alianzas futuras |
 
 ### Fuera del alcance (fase inicial)
 
-- Aplicaciones móviles nativas (iOS/Android) — se proveen APIs para integración posterior.
-- Integración directa con redes de tarjetas (Visa/Mastercard).
-- Módulo de crédito o préstamos.
+- Aplicaciones moviles nativas (iOS/Android) — se proveen APIs para integracion posterior.
+- Integracion directa con redes de tarjetas (Visa/Mastercard).
+- Modulo de credito o prestamos.
 - Soporte multimoneda.
 
 ---
@@ -65,27 +84,28 @@ PagoFacil es un nuevo desarrollo en el dominio **Finanzas / Fintech** que provee
 
 | Atributo | Meta |
 |---|---|
-| Disponibilidad | 99.9% uptime mínimo |
-| Rendimiento | < 500 ms en operaciones de consulta bajo carga nominal |
-| Seguridad | TLS 1.2+ en tránsito · AES-256 en reposo · vault para secretos |
-| Consistencia | Garantías ACID para operaciones financieras críticas |
-| Recuperación | RTO < 1 hora · RPO < 15 minutos |
-| Escalabilidad | Escalamiento horizontal automático |
-| Observabilidad | Logging + métricas + trazas distribuidas (OpenTelemetry) |
-| Compliance | GDPR / Ley de protección de datos · KYC · AML |
-| Arquitectura | Microservicios modulares con separación clara de responsabilidades |
+| Disponibilidad | 99.9% uptime minimo |
+| Rendimiento | < 500 ms para el 95% de consultas bajo carga nominal |
+| Seguridad | TLS 1.2+ en transito · AES-256 en reposo · vault para secretos |
+| Consistencia | Garantias ACID para operaciones financieras criticas |
+| Recuperacion | RTO < 1 hora · RPO < 15 minutos |
+| Escalabilidad | Escalamiento horizontal automatico |
+| Observabilidad | Logging + metricas + trazas distribuidas (OpenTelemetry) |
+| Idempotencia | Toda operacion financiera reintentable sin generar duplicados |
+| Compliance | GDPR / Ley de proteccion de datos · KYC · AML |
+| Mantenibilidad | Microservicios modulares con separacion clara de responsabilidades |
 
 ---
 
 ## Arquitectura y principios de diseño
 
 - **Security by Design** y **Privacy by Design** desde las etapas iniciales.
-- **Arquitectura hexagonal / puertos y adaptadores** para separar la lógica de negocio de los mecanismos de infraestructura y facilitar pruebas automatizadas.
-- **Event-driven architecture** con bus de eventos para procesamiento asíncrono, trazabilidad y desacoplamiento con sistemas externos.
-- **Idempotencia** en todas las operaciones financieras: cada operación puede reintentarse de forma segura sin generar duplicados.
-- **Multitenancy / segmentación por canal** para permitir futuras alianzas con entidades financieras que operen bajo la plataforma.
-- **Dashboard de auditoría** para revisión de transacciones, reportes regulatorios y gestión de alertas de fraude.
-- Despliegue en nube pública con soporte a contenedores (**Kubernetes**).
+- **Arquitectura hexagonal / puertos y adaptadores** para separar logica de negocio de infraestructura y facilitar pruebas automatizadas.
+- **Event-driven architecture** con bus de eventos para procesamiento asincrono, trazabilidad y desacoplamiento con sistemas externos.
+- **Idempotencia** en todas las operaciones financieras: cada operacion puede reintentarse de forma segura sin generar duplicados.
+- **Multitenancy / segmentacion por canal** para alianzas futuras con entidades financieras.
+- **Dashboard de auditoria** para revision de transacciones, reportes regulatorios y gestion de alertas.
+- Despliegue en nube publica con contenedores (**Kubernetes**).
 
 ---
 
@@ -93,28 +113,60 @@ PagoFacil es un nuevo desarrollo en el dominio **Finanzas / Fintech** que provee
 
 | Stakeholder | Rol | Responsabilidad |
 |---|---|---|
-| Sponsor ejecutivo | Patrocinador | Aprobación de presupuesto y priorización estratégica |
-| Project Manager | Gestión de proyecto | Planificación, seguimiento y control |
-| Arquitecto de software | Diseño técnico | Arquitectura, estándares y revisión de diseño |
-| Equipo de desarrollo | Implementación | Construcción, pruebas unitarias e integración |
-| Equipo de seguridad | Seguridad de la información | Revisión de controles, pentesting y cumplimiento |
-| Oficial de cumplimiento | Compliance / Regulatorio | Validación KYC, AML y protección de datos |
+| Sponsor ejecutivo | Patrocinador | Aprobacion de presupuesto y priorizacion estrategica |
+| Project Manager | Gestion de proyecto | Planificacion, seguimiento y control |
+| Arquitecto de software | Diseno tecnico | Arquitectura, estandares y revision de diseno |
+| Equipo de desarrollo | Implementacion | Construccion, pruebas unitarias e integracion |
+| Equipo de seguridad | Seguridad de la informacion | Revision de controles, pentesting y cumplimiento |
+| Oficial de cumplimiento | Compliance / Regulatorio | Validacion KYC, AML y proteccion de datos |
 | Equipo de operaciones | DevOps / SRE | Infraestructura, despliegue y observabilidad |
-| Usuarios finales | Usuarios de la plataforma | Gestión de fondos y transacciones |
-| Entidades financieras | Integración externa | Proveedores de fondeo, liquidación y servicios financieros |
+| Usuarios finales | Usuarios de la plataforma | Gestion de fondos y transacciones |
+| Entidades financieras | Integracion externa | Proveedores de fondeo, liquidacion y servicios financieros |
+
+---
+
+## Cronograma de alto nivel
+
+| Fase | Descripcion | Duracion Estimada |
+|---|---|---|
+| 0 — Iniciacion | Designacion de sponsor y PM; marco regulatorio; conformacion del equipo | 2 semanas |
+| 1 — Analisis de Requerimientos | Levantamiento de requerimientos; casos de uso core | 3-4 semanas |
+| 2 — Diseno Estrategico | Arquitectura de alto nivel; contratos de APIs; estrategia de seguridad | 3-4 semanas |
+| 3 — Diseno Tecnico | Diseno detallado de microservicios; especificaciones de integracion | 3-4 semanas |
+| 4 — Implementacion Fase 1 | Nucleo financiero: identidad, operaciones core, seguridad base | 10-12 semanas |
+| 5 — Implementacion Fase 2 | Fraude, AML, dashboard de auditoria, integraciones externas | 8-10 semanas |
+| 6 — QA y Seguridad | Pruebas funcionales, de carga, penetracion y cumplimiento | 4-6 semanas |
+| 7 — Despliegue y Estabilizacion | Produccion, monitoreo intensivo y ajustes post-lanzamiento | 3-4 semanas |
+| **Total estimado** | | **~36-46 semanas** |
 
 ---
 
 ## Riesgos conocidos
 
-| Riesgo | Descripcion |
+| Riesgo | Probabilidad | Impacto | Mitigacion |
+|---|---|---|---|
+| Cambios regulatorios KYC/AML durante el desarrollo | Media | Alto | Oficial de cumplimiento desde analisis; diseno modular |
+| Vulnerabilidades en componentes de terceros | Media | Critico | SBOM, pentesting por fase, revision criptografica |
+| APIs de entidades financieras no disponibles | Alta | Alto | Contratos previos al inicio; adaptadores desacoplados; mocks |
+| Subestimacion del volumen transaccional | Media | Alto | Pruebas de carga desde QA; escalamiento horizontal desde el origen |
+| Debilidad en controles antifraude | Media | Critico | Motor de reglas configurable; revision periodica con oficial de cumplimiento |
+| Inconsistencias en transacciones distribuidas | Baja | Critico | Saga / outbox pattern; idempotencia; conciliacion automatica; pruebas de caos |
+| Retrasos por falta de sponsor y PM | Alta | Alto | Designacion como condicion previa al arranque |
+
+---
+
+## Criterios de exito
+
+| Criterio | Indicador Medible |
 |---|---|
-| Regulatorio | Cambios en normativas KYC/AML o protección de datos pueden requerir ajustes de alcance |
-| Seguridad | Vulnerabilidades en componentes de terceros o errores criptográficos pueden comprometer la plataforma |
-| Integración | Dependencia de APIs de entidades financieras externas con disponibilidad no garantizada |
-| Escalabilidad | Subestimación del volumen transaccional puede impactar rendimiento y disponibilidad |
-| Fraude | Debilidad en controles antifraude puede exponer la plataforma a pérdidas y sanciones |
-| Consistencia | Fallos en transacciones distribuidas pueden generar inconsistencias financieras |
+| Disponibilidad | Uptime >= 99.9% en 90 dias post-lanzamiento |
+| Rendimiento | < 500 ms para el 95% de consultas bajo carga nominal |
+| Cumplimiento regulatorio | Cero observaciones criticas en auditoria KYC/AML en primer ciclo |
+| Seguridad | Cero vulnerabilidades criticas no resueltas al momento del despliegue |
+| Integridad financiera | Tasa de discrepancias en conciliacion < 0.01% del total diario |
+| Cobertura de pruebas | >= 80% en modulos criticos (nucleo financiero, seguridad) |
+| Recuperacion ante desastres | RTO < 1h y RPO < 15min verificados en ejercicio previo al lanzamiento |
+| Incidentes de fraude | Tasa de transacciones fraudulentas no detectadas < umbral regulatorio |
 
 ---
 
@@ -122,27 +174,23 @@ PagoFacil es un nuevo desarrollo en el dominio **Finanzas / Fintech** que provee
 
 **Supuestos:**
 
-- Conectividad con entidades bancarias o proveedores de fondeo mediante APIs disponibles.
+- Conectividad con entidades bancarias o proveedores de fondeo mediante APIs disponibles y contratadas.
 - El equipo cuenta con experiencia en microservicios y seguridad en aplicaciones financieras.
-- Las normativas regulatorias aplicables se definirán junto al oficial de cumplimiento antes del inicio de implementación.
-- La infraestructura de despliegue será en nube pública con soporte a contenedores (Kubernetes).
+- Las normativas regulatorias aplicables se definen con el oficial de cumplimiento antes del inicio de la implementacion.
+- Infraestructura en nube publica con soporte completo a contenedores (Kubernetes).
 
 **Restricciones:**
 
-- Cumplimiento con la legislación de protección de datos personales vigente en la jurisdicción de operación.
-- Las credenciales y datos sensibles no podrán almacenarse en texto plano bajo ninguna circunstancia.
-- Las APIs externas deben implementar autenticación OAuth 2.0 / OpenID Connect.
-- Los datos de transacciones financieras deben conservarse por el período mínimo exigido por la normativa regulatoria.
-- El presupuesto y los plazos están sujetos a aprobación del sponsor ejecutivo.
+- Cumplimiento con legislacion de proteccion de datos personales vigente en la jurisdiccion de operacion.
+- Credenciales y datos sensibles no pueden almacenarse en texto plano bajo ninguna circunstancia.
+- APIs externas deben implementar autenticacion OAuth 2.0 / OpenID Connect sin excepcion.
+- Datos de transacciones financieras deben conservarse por el periodo minimo exigido por normativa.
+- Presupuesto y plazos sujetos a aprobacion formal del sponsor ejecutivo.
 
 ---
 
-## Presupuesto
+## Documentacion
 
-Por definir tras estimación detallada. Categorías principales:
-
-- Desarrollo de software
-- Infraestructura cloud
-- Licencias de herramientas y servicios
-- Seguridad y auditoría
-- Capacitación y certificaciones de cumplimiento
+| Documento | Ruta | Etapa SDLC |
+|---|---|---|
+| Project Initiation Document (PID) | [`docs/planning/PID-PagoFacil.md`](docs/planning/PID-PagoFacil.md) | Planeacion |
