@@ -192,7 +192,41 @@ export const options = {
 
 ---
 
-## 7. Configuración del Ambiente de Pruebas
+## 7. Verificación E2E de Observabilidad
+
+Verificar que el stack instalado en la Etapa 0c está integrado correctamente con todos los microservicios desplegados. Estos escenarios se ejecutan una vez que todas las etapas 3a-3i están completas y los servicios están corriendo en K3d.
+
+| Escenario | Herramienta | Precondición | Resultado esperado |
+|---|---|---|---|
+| Traza end-to-end en Jaeger | Jaeger UI `http://localhost:16686` | Request HTTP a `identity-service POST /v1/auth/login` | Traza con spans de `identity-service`; `traceId` visible y correlacionable |
+| Traza de saga en Jaeger | Jaeger UI | `POST /v1/wallet/deposits` ejecutado (saga Deposito happy path) | Traza distribuida con spans de `wallet-service` e `integration-service` en la misma traza |
+| Métricas en Prometheus | `http://localhost:9090` | Todos los servicios en `Running` + al menos 1 request | `http_server_requests_seconds_count{application="identity-service"}` presente en Prometheus; todos los targets en `Status > Targets` en estado `UP` |
+| Log JSON con traceId | Grafana/Loki | Request HTTP generada | Log con `traceId` y `spanId` coincidentes con la traza de Jaeger; campo `service` = nombre del microservicio |
+| Correlación log ↔ traza | Grafana/Loki + Jaeger | Traza visible en Jaeger | Copiar `traceId` de Jaeger → buscar en Loki con `{service="identity-service"} |= "<traceId>"` → logs coinciden |
+| Prometheus scrapea todos los servicios | `http://localhost:9090/targets` | Todos los servicios en `Running` | identity-service, wallet-service, fraud-service, notification-service, audit-service, projection-service en estado `UP`; ninguno en `DOWN` |
+| Observabilidad en staging/prod | CloudWatch Console | Módulo Terraform `observability` aplicado | Log Group `/pagofacil/staging/identity-service` recibe logs JSON; X-Ray muestra trazas; alarmas en estado `OK` |
+
+**Comandos de verificación rápida:**
+
+```bash
+KUBECONFIG=terraform/backend/environments/dev/.kube/config-k3d
+
+# Verificar targets de Prometheus
+kubectl port-forward svc/prometheus-operated 9090:9090 -n monitoring &
+curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | select(.labels.job=="kubernetes-pods") | {service: .labels.app, health: .health}'
+
+# Verificar servicios en Jaeger tras una request de prueba
+kubectl port-forward svc/jaeger 16686:16686 -n tracing &
+curl http://localhost:16686/api/services | jq '.data[]'
+
+# Buscar logs con traceId en Loki (reemplazar <traceId> con un valor real de Jaeger)
+curl -G http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={namespace="dev"} |= "<traceId>"' | jq '.data.result[].values[][1]'
+```
+
+---
+
+## 8. Configuración del Ambiente de Pruebas
 
 ### Variables de entorno para el ambiente de test
 
@@ -244,7 +278,7 @@ bash .claude/scripts/seed-test-data.sh -P pagofacil --environment dev
 
 ---
 
-## 8. Criterios de Aceptación
+## 9. Criterios de Aceptación
 
 - [ ] Todos los escenarios de integración de la Sección 3 pasan sin errores.
 - [ ] Contract tests de WireMock validan los 8 escenarios (éxito, reintentos, circuit breaker, timeout, KYC).
@@ -259,3 +293,6 @@ bash .claude/scripts/seed-test-data.sh -P pagofacil --environment dev
 - [ ] Pruebas de carga sostenida de 15 minutos sobre sagas: 0 sagas en estado STUCK; 0 inconsistencias de saldo.
 - [ ] `wallet-service` no produce saldos negativos ni inconsistencias bajo carga concurrente de 20 VU.
 - [ ] El lag del `projection-service` se mantiene < 30s durante prueba de carga.
+- [ ] Los 6 escenarios de observabilidad de la Sección 7 están verificados: trazas en Jaeger, métricas en Prometheus, logs JSON con `traceId` en Loki.
+- [ ] Todos los targets de Prometheus están en estado `UP` (ningún servicio en `DOWN`).
+- [ ] La correlación log ↔ traza funciona: un `traceId` de Jaeger encuentra sus logs en Loki.

@@ -59,17 +59,19 @@ bash .claude/scripts/scaffold-all-services.sh \
 
 | Servicio | Puerto | BD | Mensajería | Módulos generados |
 |---|---|---|---|---|
-| `identity-service` | 8081 | `pagofacil_identity_service` | kafka-producer | Maven hexagonal, Outbox, Dockerfile, Helm, Jenkinsfile, saga-participant, compensación |
-| `wallet-service` | 8082 | `pagofacil_wallet_service` | kafka-producer | Maven hexagonal, Outbox, Dockerfile, Helm, Jenkinsfile, saga-participant, compensación |
-| `fraud-service` | 8083 | `pagofacil_fraud_service` | kafka-consumer + producer | Maven hexagonal, Outbox, Dockerfile, Helm, Jenkinsfile, saga-participant, compensación |
-| `notification-service` | 8084 | `pagofacil_notification_service` | kafka-consumer | Maven hexagonal, Dockerfile, Helm, Jenkinsfile |
-| `audit-service` | 8085 | `pagofacil_reporting` | kafka-consumer | Maven hexagonal, Dockerfile, Helm, Jenkinsfile |
-| `projection-service` | 8087 | `pagofacil_readmodel` | kafka-consumer | Maven hexagonal, Dockerfile, Helm, Jenkinsfile |
-| `integration-service` | 8086 | `pagofacil_integration_service` | kafka-producer + consumer | integration_service_scaffold, Camel routes (3 sistemas externos), saga orchestrator (4 flows), Dockerfile, Helm, Jenkinsfile |
+| `identity-service` | 8081 | `pagofacil_identity_service` | kafka-producer | Maven hexagonal, Outbox, Dockerfile, Helm + **observabilidad**, Jenkinsfile, saga-participant, compensación |
+| `wallet-service` | 8082 | `pagofacil_wallet_service` | kafka-producer | Maven hexagonal, Outbox, Dockerfile, Helm + **observabilidad**, Jenkinsfile, saga-participant, compensación |
+| `fraud-service` | 8083 | `pagofacil_fraud_service` | kafka-consumer + producer | Maven hexagonal, Outbox, Dockerfile, Helm + **observabilidad**, Jenkinsfile, saga-participant, compensación |
+| `notification-service` | 8084 | `pagofacil_notification_service` | kafka-consumer | Maven hexagonal, Dockerfile, Helm + **observabilidad**, Jenkinsfile |
+| `audit-service` | 8085 | `pagofacil_reporting` | kafka-consumer | Maven hexagonal, Dockerfile, Helm + **observabilidad**, Jenkinsfile |
+| `projection-service` | 8087 | `pagofacil_readmodel` | kafka-consumer | Maven hexagonal, Dockerfile, Helm + **observabilidad**, Jenkinsfile |
+| `integration-service` | 8086 | `pagofacil_integration_service` | kafka-producer + consumer | integration_service_scaffold, Camel routes (3 sistemas externos), saga orchestrator (4 flows), Dockerfile, Helm + **observabilidad**, Jenkinsfile |
 | `report-extraction-service` (MS1) | CronJob | JDBC `pagofacil_readmodel` + `pagofacil_reporting` | kafka-producer | scala_hexagonal_scaffold, CronJob Helm, Jenkinsfile batch |
 | `report-processing-service` (MS2) | CronJob | S3 Parquet | kafka-consumer + producer | scala_hexagonal_scaffold, CronJob Helm, Jenkinsfile batch |
 | `pagofacil-web` | 3000 (dev Vercel) | — | — | Next.js 15 app router, Jenkinsfile frontend |
 | Serverless reporting | — | S3 | kafka-consumer + EventBridge | Python lambdas (PDF, XLS, CSV), Terraform EventBridge |
+
+> **Observabilidad (automática):** cada microservicio Spring Boot generado incluye sin intervención manual: `logback-spring.xml` (JSON con `traceId`/`spanId`), dependencias `micrometer-registry-prometheus`, `micrometer-tracing-bridge-otel`, `opentelemetry-exporter-otlp` y `logstash-logback-encoder` en el `pom.xml`, bloque `management` en `application.yml`, y en el Helm chart: pod annotations para Prometheus, init container del OTEL Java Agent y variables de entorno OTEL (`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `JAVA_TOOL_OPTIONS`). Ver [DEV-PagoFacil-0c-observability.md](DEV-PagoFacil-0c-observability.md) para detalle.
 
 ---
 

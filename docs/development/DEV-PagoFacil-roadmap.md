@@ -61,7 +61,8 @@ Herramientas a instalar antes de comenzar cualquier etapa:
 | # | Etapa | Documento | Dependencias previas | Esfuerzo estimado |
 |---|---|---|---|---|
 | 0 | Infraestructura local (floci + K3d + SonarQube) | [DEV-PagoFacil-00-infrastructure.md](DEV-PagoFacil-00-infrastructure.md) | Prerrequisitos globales | 0.5 días |
-| 1 | Bases de datos y migraciones | [DEV-PagoFacil-01-databases.md](DEV-PagoFacil-01-databases.md) | Etapa 0 | 0.5 días |
+| 0c | Stack de observabilidad (OTEL + Prometheus + Grafana + CloudWatch) | [DEV-PagoFacil-0c-observability.md](DEV-PagoFacil-0c-observability.md) | Etapa 0 completa | 0.5 días |
+| 1 | Bases de datos y migraciones | [DEV-PagoFacil-01-databases.md](DEV-PagoFacil-01-databases.md) | Etapa 0c | 0.5 días |
 | 2 | Scaffolding de proyectos | [DEV-PagoFacil-02-scaffold.md](DEV-PagoFacil-02-scaffold.md) | Etapa 1 | 1 día |
 | 2b | Configuración del pipeline CI/CD (Jenkins + ArgoCD) | [DEV-PagoFacil-02b-cicd.md](DEV-PagoFacil-02b-cicd.md) | Etapa 2 + infra Jenkins/ArgoCD (Etapa 0) | 1 día |
 | 3a | Microservicio: identity-service | [DEV-PagoFacil-03-ms-identity-service.md](DEV-PagoFacil-03-ms-identity-service.md) | Etapa 2b | 4 días |
@@ -79,7 +80,7 @@ Herramientas a instalar antes de comenzar cualquier etapa:
 | 5 | Pruebas de integración, E2E, estrés y carga | [DEV-PagoFacil-05-tests.md](DEV-PagoFacil-05-tests.md) | Todos los servicios y features | 5 días |
 | 6 | Reportería serverless (Lambda + EventBridge) | [DEV-PagoFacil-06-reporting-serverless.md](DEV-PagoFacil-06-reporting-serverless.md) | Etapa 3i | 3 días |
 
-**Esfuerzo total estimado:** ~57 días-persona (sin contar paralelismo de equipos)
+**Esfuerzo total estimado:** ~57.5 días-persona (sin contar paralelismo de equipos)
 
 ---
 
@@ -180,6 +181,13 @@ Un componente se considera **Done** cuando cumple **todos** los criterios siguie
 - [ ] ArgoCD muestra el estado `Synced` para el Application del servicio.
 - [ ] Los secretos `pagofacil/dev/<servicio>` existen en floci con valores correctos.
 - [ ] Las migraciones Liquibase (`run-liquibase-migrations.sh`) se aplican sin errores.
+
+### Criterios de observabilidad (dev)
+
+- [ ] `/actuator/prometheus` del servicio responde HTTP 200 (verificado en `runSmokeTests` del pipeline).
+- [ ] Prometheus (`http://localhost:9090 → Status > Targets`) muestra el servicio como `UP`.
+- [ ] Una request HTTP al servicio genera una traza visible en Jaeger (`http://localhost:16686`).
+- [ ] Los logs del servicio en Grafana/Loki muestran JSON con `traceId` y `spanId` correlacionados con la traza de Jaeger.
 
 ### Criterios funcionales
 
