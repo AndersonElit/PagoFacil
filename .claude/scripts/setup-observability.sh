@@ -225,6 +225,8 @@ helm upgrade --install loki grafana/loki \
   --set loki.auth_enabled=false \
   --set deploymentMode=SingleBinary \
   --set singleBinary.replicas=1 \
+  --set loki.commonConfig.replication_factor=1 \
+  --set loki.storage.type=filesystem \
   --wait --timeout=4m
 
 helm upgrade --install fluent-bit fluent/fluent-bit \
