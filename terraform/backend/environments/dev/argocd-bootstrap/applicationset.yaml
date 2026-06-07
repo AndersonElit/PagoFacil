@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: pagofacil-dev
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - list:
+        elements:
+          # -- services managed by scaffold --
+          # repoURL apunta a Gitea en floci-net (http://gitea:3000); ArgoCD (pod en
+          # el cluster K3d pagofacil-dev) lo alcanza porque está en la misma red floci-net.
+  template:
+    metadata:
+      name: '{{.service}}-dev'
+    spec:
+      project: pagofacil
+      source:
+        repoURL: '{{.repoURL}}'
+        targetRevision: '{{.revision}}'
+        path: 'helm/{{.service}}'
+        helm:
+          valueFiles:
+            - 'values-dev.yaml'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: dev
+      # dev: auto-sync con prune + selfHeal (corrige drift automáticamente).
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

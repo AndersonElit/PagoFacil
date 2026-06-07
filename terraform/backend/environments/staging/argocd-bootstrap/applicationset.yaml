@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: pagofacil-staging
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - list:
+        elements:
+          # -- services managed by scaffold --
+          # Las entradas se añaden automáticamente al correr maven_hexagonal_scaffold.py.
+          # repoURL apunta a Gitea en floci-net (http://gitea:3000); ArgoCD llega a él
+          # porque el cluster K3d (donde corre k3s) está en la misma red floci-net.
+  template:
+    metadata:
+      name: '{{.service}}-staging'
+    spec:
+      project: pagofacil
+      source:
+        repoURL: '{{.repoURL}}'
+        targetRevision: '{{.revision}}'
+        path: 'helm/{{.service}}'
+        helm:
+          valueFiles:
+            - 'values-staging.yaml'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: staging
+      # staging: auto-sync con prune + selfHeal (corrige drift automáticamente).
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
