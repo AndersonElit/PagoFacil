@@ -44,7 +44,10 @@ git push → Gitea webhook → Jenkins
 ## 0. Ejecución automatizada (recomendado)
 
 ```bash
-bash .claude/scripts/setup-cicd-pipeline.sh -P pagofacil
+bash .claude/scripts/setup-cicd-pipeline.sh \
+  -P pagofacil \
+  -S "identity-service,wallet-service,fraud-service,notification-service,audit-service,projection-service,integration-service,report-extraction-service,report-processing-service" \
+  -F "pagofacil-web"
 ```
 
 **En dev, el script es completamente autónomo.** Ejecuta 7 secciones en orden:
