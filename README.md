@@ -10,8 +10,8 @@ Este repositorio sigue un framework de ciclo de vida de desarrollo de software (
 
 ```
 Etapa 0 — Requerimiento del cliente    ✓ completada
-Etapa 1 — Planeación (PID)             ← estamos aquí
-Etapa 2 — Análisis de Requerimientos (SRS)
+Etapa 1 — Planeación (PID)             ✓ completada
+Etapa 2 — Análisis de Requerimientos (SRS)  ← estamos aquí
 Etapa 3 — Pre-Diseño (Strategic SDD)
 Etapa 4 — Diseño Técnico (Technical SDD)
 Etapa 5 — Implementación
@@ -76,12 +76,39 @@ Etapa 5 — Implementación
 
 ---
 
+## Etapa 2 — Análisis de Requerimientos (SRS)
+
+### Proceso
+
+1. Se ejecuta la skill `/requirements-srs` con el PID como entrada.
+2. El SRS generado se guarda en `docs/requirements/`.
+3. Este documento sirve como entrada para la skill `/strategic-design-sdd` en la siguiente etapa.
+
+### Artefacto generado
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/requirements/SRS-PagoFacil.md`](docs/requirements/SRS-PagoFacil.md) | Software Requirements Specification — define actores, requerimientos funcionales y no funcionales, restricciones y criterios de aceptación |
+
+### Resumen del SRS
+
+| Campo | Valor |
+|-------|-------|
+| **Versión** | 1.0 |
+| **Estado** | Borrador — pendiente revisión por stakeholders |
+| **Actores identificados** | 7 (Usuario Final, Administrador, Oficial de Cumplimiento, Analista de Fraude, Entidad Financiera, Pasarela de Pago, Sistema de Auditoría) |
+| **Procesos principales** | Onboarding/KYC, operaciones financieras (depósito/retiro/transferencia), consulta/reportes, compliance AML, integración APIs, auditoría |
+| **Fuera del alcance** | Apps móviles nativas, integración directa Visa/Mastercard, crédito/préstamos, multimoneda (fase inicial) |
+| **Arquitectura operacional** | Microservicios sobre Kubernetes en nube pública, comunicación basada en eventos |
+
+---
+
 ## Próximo paso
 
-Con el PID aprobado, ejecutar la skill de análisis de requerimientos:
+Con el SRS generado, ejecutar la skill de pre-diseño estratégico:
 
 ```
-/requirements-srs
+/strategic-design-sdd
 ```
 
-Esto generará el **Software Requirements Specification (SRS)** en `docs/requirements/`.
+Esto generará el **Strategic Design Document (SDD)** en `docs/strategic-design/`.
