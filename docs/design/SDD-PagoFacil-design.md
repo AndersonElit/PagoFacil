@@ -288,3 +288,61 @@ Los siguientes eventos generan traza de auditoría inmutable en MongoDB:
 - Masking de campos sensibles en logs y trazas OpenTelemetry (email, nombre, monto se registran solo en auditoría, no en logs operacionales).
 - Respuestas de error hacia el exterior son genéricas (sin stack trace ni detalles internos); detalle completo registrado internamente con `correlationId`.
 - `correlationId` propagado en todos los headers HTTP y eventos Kafka para trazabilidad end-to-end.
+
+---
+
+## 5. Especificación de Pruebas (ATDD)
+
+Trazabilidad de los criterios de aceptación del Strategic Design (AC-xxx) hacia los tipos de prueba técnica y los contratos verificables en implementación.
+
+### Matriz de trazabilidad AC → Prueba técnica
+
+| Criterio ATDD | Tipo de prueba | Componente bajo prueba | Escenarios técnicos clave | Gate de aceptación |
+|---|---|---|---|---|
+| AC-001-S1, AC-001-E1, AC-001-E2 | Integration + Contract | `identity-service` ↔ `integration-service` (proveedor KYC) | KYC aprobado activa cuenta; KYC rechazado deja cuenta en `REJECTED`; coincidencia AML suspende y publica alerta | Estado de cuenta correcto en BD; evento `UserActivated` / `KycRejected` / `UserSuspended` en Kafka |
+| AC-001-E3 | Integration | `identity-service` | Registro con correo duplicado retorna error | HTTP 409 + sin registro parcial en BD |
+| AC-002-S1 | Integration | `identity-service` ↔ AWS Cognito | Credenciales válidas + MFA correcto emiten tokens | JWT con claims `sub`, `role`, `tenant_id` válidos; sesión registrada |
+| AC-002-E1 | Integration | `identity-service` | Intentos fallidos ≥ umbral bloquea cuenta | Estado `BLOCKED` en BD; ningún intento posterior autorizado |
+| AC-002-E2, AC-002-E3 | Integration | `identity-service` | MFA incorrecto/expirado rechaza; cuenta bloqueada rechaza | HTTP 401 sin tokens; sin sesión creada |
+| AC-003-S1 | Integration + Contract | `integration-service` → `wallet-service` | Notificación válida → evaluación fraude → acreditación | Saldo incrementado; `DepositCompleted` en Kafka; idempotencia con mismo `Idempotency-Key` |
+| AC-003-E1 | Unit + Integration | `wallet-service` | Monto > límite transaccional rechaza antes de crear orden | HTTP 422 + saldo sin modificar |
+| AC-003-E2 | Integration | `integration-service` | Firma HMAC inválida en webhook → rechaza sin procesar | HTTP 401 desde `integration-service`; sin evento de dominio publicado |
+| AC-003-E3 | Integration | `integration-service` → `fraud-compliance-service` | Alerta bloqueante → depósito queda pendiente | Estado `PENDING_REVIEW` en `wallet-service`; alerta en `fraud-compliance-service` |
+| AC-004-S1 | Integration | `wallet-service` | Débito y crédito atómicos; `TransferCompleted` publicado | Saldos correctos en ambas BDs; evento en Kafka; no doble procesamiento |
+| AC-004-E1 | Unit + Integration | `wallet-service` | Saldo insuficiente rechaza antes de cualquier débito | HTTP 422 + saldo emisor intacto + saldo receptor intacto |
+| AC-004-E2 | Integration | `wallet-service` | Receptor con KYC ≠ `APPROVED` rechaza | HTTP 422 + sin modificación de saldos |
+| AC-004-E3 | Integration | `fraud-compliance-service` | Alerta bloqueante detiene transferencia | Estado `BLOCKED` + saldos intactos |
+| AC-005-S1 | Integration (Saga E2E) | `integration-service` (orquestador LRA) | Flujo saga completo exitoso: reserva → confirmación → débito permanente | Saldo definitivo correcto; estado saga `COMPLETED`; `WithdrawalCompleted` en Kafka |
+| AC-005-E1 | Integration (Saga E2E) | `integration-service` (orquestador LRA) | Fallo en entidad financiera dispara compensación `DE-009` | Reserva liberada; saldo restaurado; `FundsReservationReleased` en Kafka; estado saga `COMPENSATED` |
+| AC-005-E2 | Unit + Integration | `wallet-service` | Saldo disponible < monto + reservas activas rechaza | HTTP 422 + sin reserva creada |
+| AC-005-E3 | Integration | `wallet-service` | Cuenta bancaria no vinculada rechaza | HTTP 422 + sin reserva creada |
+| AC-006-S1 | Integration | `wallet-service` / `integration-service` | Reintento con mismo `Idempotency-Key` completado → respuesta idéntica sin nuevo efecto | Tabla `processed_message` registra la entrada; HTTP 200 con resultado original |
+| AC-006-E1 | Integration | `wallet-service` / `integration-service` | Reintento con `Idempotency-Key` en curso → rechazo por concurrencia | HTTP 409 Conflict; sin segunda instancia de operación |
+| AC-007-S1 | Integration | `fraud-compliance-service` + `audit-service` | Analista aprueba alerta → operación liberada → auditoría inmutable | Estado alerta `RESOLVED`; operación liberada; registro inmutable en MongoDB |
+| AC-007-E1 | Integration | `fraud-compliance-service` | Motor clasifica como `CRITICAL` → bloqueo automático | Operación en estado `BLOCKED`; alerta de alta prioridad creada; sin modificación de saldos |
+| AC-007-E2 | Integration | `fraud-compliance-service` → `identity-service` | Oficial confirma AML positivo → suspensión de cuenta + cancelación de operaciones | Estado cuenta `SUSPENDED`; operaciones pendientes `CANCELLED`; ROS/SAR candidato registrado |
+| AC-008-S1 | Integration (CronJob E2E) | MS1 → MS2 → Lambda | Pipeline ETL completo: extracción JDBC → Parquet raw → transformación → Parquet processed → PDF/XLS/CSV | Archivo de reporte generado; ejecución en catálogo `COMPLETED`; notificación enviada |
+| AC-008-E1 | Integration | MS1 (`report-extraction-service`) | Error JDBC al leer `pagofacil_readmodel` → `ReportExtractionFailed` | Evento publicado en Kafka; ejecución en catálogo `FAILED`; alerta a operaciones; datos operacionales intactos |
+| AC-008-E2 | Integration | MS1 (`report-extraction-service`) | Datos no cumplen `ReportSchema` → rechazo sin Parquet | `ReportExtractionFailed` con motivo `SCHEMA_VALIDATION`; sin archivo generado; ejecución `FAILED` |
+
+### Estrategia de prueba por capa
+
+| Capa | Herramienta | Alcance |
+|---|---|---|
+| Unit | JUnit 5 + Mockito (Java) / ScalaTest (Scala) | Lógica de dominio, reglas de negocio, validaciones de entidad |
+| Integration | Spring Boot Test + Testcontainers (PostgreSQL + Kafka) + WireMock (sistemas externos) | Flujos de saga, persistencia, publicación de eventos, contratos REST internos |
+| Contract (Consumer-Driven) | Pact JVM | Contratos entre `integration-service` y sistemas externos KYC/AML/pasarelas; entre productores y consumidores Kafka |
+| E2E | API calls sobre entorno `dev` (K3s) | Flujos críticos: onboarding completo, transferencia, retiro con compensación, pipeline ETL |
+| Carga / Estrés | k6 o Gatling | Respuesta < 500 ms bajo carga nominal; comportamiento bajo carga sostenida y picos |
+
+### Convención de nombrado de tests de integración
+
+Los tests de integración que validan criterios ATDD deben incluir el ID del criterio en el nombre del método o en la anotación `@DisplayName`:
+
+```java
+@Test
+@DisplayName("AC-004-E1: transferencia rechazada cuando saldo emisor es insuficiente")
+void shouldRejectTransferWhenInsufficientBalance() { ... }
+```
+
+Esto garantiza trazabilidad directa entre criterio de aceptación y test ejecutable en el reporte de CI.

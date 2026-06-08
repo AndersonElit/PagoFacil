@@ -766,11 +766,190 @@ Consecuencias:
 
 ---
 
-## 9. Escenarios BDD
+## 9. Criterios de Aceptación (ATDD)
+
+---
+
+## AC-001 — Registro y Activación de Cuenta
+
+**Caso de uso / Capacidad:** RF-01 — Registro de usuario con validación KYC y control AML en onboarding.
+
+**Bounded Context:** Identity.
+
+**Regla de negocio asociada:** Una cuenta solo puede activarse cuando el proceso KYC finaliza con estado Aprobado. El control AML se evalúa antes de solicitar validación KYC; una coincidencia positiva suspende el proceso de forma automática.
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-001-S1 | Usuario completa el registro con datos válidos, confirma correo electrónico y el proveedor KYC aprueba la validación de documentos | La cuenta queda en estado Activo, se crea una billetera digital con saldo cero y el usuario recibe notificación de cuenta operativa |
+| AC-001-S2 | El usuario ingresa el código de verificación de correo válido dentro del período de expiración | El paso de verificación queda completado y el proceso de onboarding avanza al estado siguiente |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-001-E1 | El proveedor KYC devuelve resultado Rechazado tras evaluar los documentos del usuario | La cuenta queda en estado Rechazado; el usuario no puede realizar ninguna operación financiera |
+| AC-001-E2 | El sistema detecta coincidencia positiva en listas de sanciones AML durante el onboarding | La cuenta queda en estado Suspendido automáticamente, el proceso se detiene y se genera una alerta de compliance para el Oficial de Cumplimiento |
+| AC-001-E3 | El usuario intenta registrarse con un correo electrónico ya existente en la plataforma | El sistema rechaza la creación sin generar registros parciales y retorna un error de identidad duplicada |
+
+---
+
+## AC-002 — Autenticación con MFA
+
+**Caso de uso / Capacidad:** RF-02 — Autenticación multifactor con bloqueo automático por intentos fallidos.
+
+**Bounded Context:** Identity.
+
+**Regla de negocio asociada:** La autenticación requiere credenciales válidas más código MFA. Si el número de intentos fallidos consecutivos supera el umbral configurado, la cuenta se bloquea automáticamente; solo puede desbloquearse por flujo de recuperación o por el Administrador.
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-002-S1 | Usuario con cuenta Activa ingresa credenciales correctas y código MFA válido y no expirado | El sistema emite access token y refresh token, registra la sesión activa y concede acceso a la plataforma |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-002-E1 | El usuario supera el umbral configurado de intentos fallidos de autenticación | La cuenta queda bloqueada automáticamente y no acepta ningún intento adicional hasta desbloqueo explícito |
+| AC-002-E2 | El usuario ingresa un código MFA incorrecto o expirado | El sistema rechaza el acceso sin emitir tokens y contabiliza el intento fallido |
+| AC-002-E3 | El usuario intenta autenticarse con una cuenta en estado Bloqueado | El sistema rechaza la autenticación e indica que la cuenta requiere desbloqueo explícito |
+
+---
+
+## AC-003 — Depósito de Fondos
+
+**Caso de uso / Capacidad:** RF-03 — Acreditación de fondos con confirmación de entidad financiera y evaluación AML/fraude.
+
+**Bounded Context:** Wallet, Integration.
+
+**Regla de negocio asociada:** El saldo solo se acredita tras recibir confirmación auténtica de la entidad financiera y solo si no hay alertas AML ni de fraude bloqueantes. La autenticidad de la notificación se valida mediante firma digital o token de webhook antes de procesar.
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-003-S1 | La entidad financiera confirma el depósito con firma válida y el motor de fraude no genera alertas bloqueantes | El saldo de la billetera del usuario se incrementa en el monto confirmado, se publica `DepositCompleted` y el usuario recibe notificación |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-003-E1 | El monto del depósito supera el Límite Transaccional configurado para el usuario | El sistema rechaza la operación antes de crear la orden de depósito; el saldo no se modifica |
+| AC-003-E2 | La notificación de la entidad financiera contiene firma digital inválida o token de webhook incorrecto | El sistema rechaza la notificación sin modificar saldos ni emitir eventos de dominio |
+| AC-003-E3 | El motor de fraude genera una alerta bloqueante para la operación de depósito | El depósito queda en estado Pendiente de revisión manual; el saldo no se acredita hasta resolución del Analista de Fraude |
+
+---
+
+## AC-004 — Transferencia entre Usuarios
+
+**Caso de uso / Capacidad:** RF-04 — Transferencia atómica de fondos entre cuentas con validación de prerrequisitos y evaluación de fraude.
+
+**Bounded Context:** Wallet, Integration.
+
+**Regla de negocio asociada:** La transferencia se ejecuta de forma atómica: el débito del emisor y el crédito del receptor ocurren en la misma operación o ninguno se aplica. Ambas partes deben tener KYC en estado Aprobado; el emisor debe tener Saldo Disponible suficiente.
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-004-S1 | Emisor con saldo suficiente y KYC Aprobado confirma transferencia a receptor con KYC Aprobado y el motor de fraude no genera alertas bloqueantes | El saldo del emisor se reduce atómicamente y el del receptor se incrementa; se publica `TransferCompleted`; ambas partes reciben notificación |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-004-E1 | El Saldo Disponible del emisor es menor al monto solicitado para la transferencia | El sistema rechaza la operación antes de ejecutar cualquier débito; ningún saldo es modificado |
+| AC-004-E2 | El receptor tiene estado KYC distinto de Aprobado (Pendiente, Rechazado o Suspendido) | El sistema rechaza la transferencia sin modificar ningún saldo |
+| AC-004-E3 | El motor de fraude genera una alerta bloqueante sobre la operación de transferencia | La transferencia es detenida y marcada para revisión manual; ningún saldo es modificado hasta resolución del Analista de Fraude |
+
+---
+
+## AC-005 — Retiro de Fondos
+
+**Caso de uso / Capacidad:** RF-05 — Retiro de fondos hacia cuenta bancaria vinculada con compensación de saga ante fallo externo.
+
+**Bounded Context:** Wallet, Integration.
+
+**Regla de negocio asociada:** Durante el procesamiento, el monto queda en Reserva de Fondos (no disponible para otras operaciones). Si la entidad financiera reporta fallo, la saga ejecuta compensación automática liberando la reserva y restaurando el Saldo Disponible. (Evento de compensación: `DE-009 — FundsReservationReleased`.)
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-005-S1 | La entidad financiera confirma el retiro exitosamente | La Reserva de Fondos se convierte en débito permanente, el Saldo Disponible refleja el retiro definitivo y el usuario recibe notificación de éxito |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-005-E1 | La entidad financiera reporta fallo en el procesamiento del retiro | La saga ejecuta compensación automática (`DE-009`): la Reserva de Fondos es liberada y el Saldo Disponible se restaura al valor previo; el usuario recibe notificación del fallo |
+| AC-005-E2 | El Saldo Disponible del usuario es insuficiente para cubrir el monto solicitado considerando Reservas de Fondos activas existentes | El sistema rechaza la solicitud sin crear ninguna Reserva de Fondos |
+| AC-005-E3 | La cuenta bancaria de destino indicada no está vinculada ni verificada para el usuario | El sistema rechaza la operación antes de crear la reserva |
+
+---
+
+## AC-006 — Idempotencia de Operaciones Financieras
+
+**Caso de uso / Capacidad:** RF-06 — Garantía de idempotencia mediante Idempotency Key en operaciones financieras.
+
+**Bounded Context:** Wallet, Integration.
+
+**Regla de negocio asociada:** Toda operación financiera enviada con un Idempotency Key ya procesado retorna el resultado original sin volver a ejecutar la operación. Esto previene duplicación de efectos ante reintentos del cliente.
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-006-S1 | Un cliente reintenta una operación con el mismo Idempotency Key de una operación previamente completada | El sistema retorna el resultado original sin crear una nueva transacción ni modificar saldos |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-006-E1 | Un cliente envía una segunda solicitud con el mismo Idempotency Key mientras la operación original está aún en curso | El sistema detecta la condición de concurrencia y rechaza el segundo intento indicando que la operación está siendo procesada |
+
+---
+
+## AC-007 — Detección y Resolución de Alertas de Fraude/AML
+
+**Caso de uso / Capacidad:** RF-07 — Detección automática de fraude y AML; resolución manual por Analista de Fraude u Oficial de Cumplimiento.
+
+**Bounded Context:** Fraud & Compliance.
+
+**Regla de negocio asociada:** El motor de riesgo evalúa cada operación financiera antes de su ejecución. Las alertas de Nivel de Riesgo Crítico bloquean la operación de forma automática. Toda resolución queda registrada de forma inmutable en la Traza de Auditoría.
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-007-S1 | El Analista de Fraude revisa y aprueba una operación previamente marcada como sospechosa | El sistema libera la operación, notifica al usuario del resultado y registra la resolución de forma inmutable en la Traza de Auditoría |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-007-E1 | El motor de riesgo clasifica una operación financiera con Nivel de Riesgo Crítico | La operación es bloqueada automáticamente sin ejecutar débitos ni créditos; se genera una alerta de alta prioridad para el Analista de Fraude |
+| AC-007-E2 | El Oficial de Cumplimiento confirma una alerta AML como positiva para un usuario | La cuenta del usuario es suspendida, todas sus operaciones financieras pendientes son canceladas y se genera un registro regulatorio (ROS/SAR candidato) |
+
+---
+
+## AC-008 — Generación de Reporte Regulatorio
+
+**Caso de uso / Capacidad:** RF-08 — Pipeline ETL de reportería regulatoria por schedule programado o on-demand.
+
+**Bounded Context:** Reporting.
+
+**Regla de negocio asociada:** Los datos se extraen exclusivamente del Read Model (`pagofacil_readmodel`) siguiendo el ReportSchema declarado en el catálogo. El pipeline no modifica datos de servicios operacionales. Los fallos generan eventos observables y alertas al equipo de operaciones.
+
+### Criterios de aceptación — Éxito
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-008-S1 | El schedule dispara el pipeline ETL y todas las etapas (MS1 extracción, MS2 transformación, Lambda formato) se completan sin errores | El reporte queda disponible en el formato solicitado (PDF/XLS/CSV), la ejecución se registra como completada en el catálogo y se notifica al solicitante |
+
+### Criterios de aceptación — Error
+| ID | Criterio (condición verificable) | Resultado esperado |
+|----|----------------------------------|--------------------|
+| AC-008-E1 | MS1 falla al extraer datos del Read Model por error de conectividad JDBC | Se publica `ReportExtractionFailed`, la ejecución se marca como fallida en el catálogo, se genera alerta para el equipo de operaciones; los datos operacionales no son afectados |
+| AC-008-E2 | Los datos extraídos por MS1 no cumplen el ReportSchema declarado en el catálogo (columnas faltantes o tipos incompatibles) | MS1 rechaza la ejecución y publica `ReportExtractionFailed` sin generar archivo Parquet; la ejecución queda marcada como fallida por validación de esquema |
+
+---
+
+## 10. Escenarios BDD
 
 ```gherkin
 Feature: Onboarding y Activación de Cuenta
+# Valida: AC-001
 
+  # --- Escenario de éxito ---
   Scenario: Registro exitoso con KYC aprobado
     Given un usuario no registrado en la plataforma
     When el usuario completa el formulario de registro con datos válidos
@@ -780,6 +959,7 @@ Feature: Onboarding y Activación de Cuenta
     And se crea una billetera digital con saldo cero
     And el usuario recibe notificación de cuenta activa y lista para operar
 
+  # --- Escenario de error ---
   Scenario: Registro bloqueado por coincidencia AML durante onboarding
     Given un usuario en proceso de onboarding con datos válidos
     When el sistema detecta una coincidencia positiva en listas de sanciones AML
@@ -790,7 +970,9 @@ Feature: Onboarding y Activación de Cuenta
 
 ```gherkin
 Feature: Transferencia entre Usuarios
+# Valida: AC-004
 
+  # --- Escenario de éxito ---
   Scenario: Transferencia exitosa entre cuentas activas con KYC aprobado
     Given un usuario emisor con saldo de 1000 unidades y KYC aprobado
     And un usuario receptor con cuenta activa y KYC aprobado
@@ -801,6 +983,7 @@ Feature: Transferencia entre Usuarios
     And ambos usuarios reciben notificación de la operación
     And la transacción queda registrada con identificador único e inmutable
 
+  # --- Escenario de error ---
   Scenario: Transferencia rechazada por saldo insuficiente
     Given un usuario emisor con saldo de 100 unidades
     When el emisor solicita transferir 200 unidades a otro usuario
@@ -818,19 +1001,41 @@ Feature: Transferencia entre Usuarios
 
 ```gherkin
 Feature: Idempotencia de Operaciones Financieras
+# Valida: AC-006
 
+  # --- Escenario de éxito ---
   Scenario: Reintento con el mismo Idempotency Key no duplica la operación
     Given una transferencia completada con idempotency-key "txn-abc-123"
     When el cliente reintenta la misma solicitud con idempotency-key "txn-abc-123"
     Then el sistema retorna el resultado de la operación original sin procesarla nuevamente
     And no se crea una segunda transacción
     And los saldos de emisor y receptor no se modifican adicionalmente
+
+  # --- Escenario de error ---
+  Scenario: Segundo reintento con Idempotency Key de operación en curso es rechazado
+    Given una transferencia en estado Procesando con idempotency-key "txn-xyz-456"
+    When el cliente envía una segunda solicitud con el mismo idempotency-key "txn-xyz-456"
+    Then el sistema detecta la condición de concurrencia y rechaza el segundo intento
+    And retorna un error indicando que la operación está siendo procesada
+    And no se crea ninguna segunda instancia de la operación
 ```
 
 ```gherkin
-Feature: Retiro de Fondos con Compensación
+Feature: Retiro de Fondos
+# Valida: AC-005
 
-  Scenario: Compensación exitosa ante fallo reportado por la entidad financiera
+  # --- Escenario de éxito ---
+  Scenario: Retiro exitoso confirmado por la entidad financiera
+    Given un usuario con saldo disponible de 500 unidades y una cuenta bancaria vinculada verificada
+    When el usuario solicita un retiro de 300 unidades y confirma la operación
+    And el sistema crea una Reserva de Fondos de 300 unidades
+    And la entidad financiera confirma el procesamiento exitoso del retiro
+    Then la Reserva de Fondos se convierte en débito permanente
+    And el saldo disponible del usuario refleja la reducción definitiva de 300 unidades
+    And el usuario recibe notificación de retiro completado
+
+  # --- Escenario de error ---
+  Scenario: Compensación automática ante fallo reportado por la entidad financiera
     Given un usuario con saldo suficiente que solicita un retiro de 300 unidades
     And el sistema ha reservado 300 unidades en la billetera
     When la entidad financiera reporta fallo en el procesamiento del retiro
@@ -841,8 +1046,18 @@ Feature: Retiro de Fondos con Compensación
 ```
 
 ```gherkin
-Feature: Bloqueo por Intentos Fallidos de Autenticación
+Feature: Autenticación con MFA
+# Valida: AC-002
 
+  # --- Escenario de éxito ---
+  Scenario: Autenticación exitosa con credenciales válidas y código MFA correcto
+    Given un usuario con cuenta en estado Activo
+    When el usuario ingresa credenciales correctas y el código MFA válido no expirado
+    Then el sistema emite access token y refresh token
+    And registra la sesión activa del usuario
+    And concede acceso a la plataforma
+
+  # --- Escenario de error ---
   Scenario: Cuenta bloqueada automáticamente tras superar el umbral de intentos fallidos
     Given un usuario con cuenta activa
     When el usuario ingresa credenciales incorrectas el número de veces igual al umbral configurado
@@ -853,7 +1068,9 @@ Feature: Bloqueo por Intentos Fallidos de Autenticación
 
 ```gherkin
 Feature: Generación de Reporte Regulatorio
+# Valida: AC-008
 
+  # --- Escenario de éxito ---
   Scenario: Pipeline ETL exitoso para reporte de alertas AML
     Given un schedule mensual configurado para el reporte "alertas-aml"
     When el job MS1 se ejecuta y extrae datos del read model según el ReportSchema declarado
@@ -863,10 +1080,55 @@ Feature: Generación de Reporte Regulatorio
     And la capa Lambda genera el formato de salida solicitado (PDF, XLS o CSV)
     And la ejecución queda registrada como completada en el catálogo de reportes
 
+  # --- Escenario de error ---
   Scenario: Fallo en extracción notifica al equipo de operaciones
     Given un schedule de reporte activo para "volumen-transaccional"
     When MS1 falla al conectar con el read model por error JDBC
     Then se publica el evento ReportExtractionFailed
     And la ejecución del reporte se marca como fallida en el catálogo
     And se genera una alerta para el equipo de operaciones
+```
+
+```gherkin
+Feature: Depósito de Fondos
+# Valida: AC-003
+
+  # --- Escenario de éxito ---
+  Scenario: Depósito exitoso con confirmación válida de entidad financiera
+    Given un usuario con cuenta Activa y KYC Aprobado
+    And un monto de depósito dentro del límite transaccional configurado
+    When la entidad financiera envía notificación de confirmación con firma válida
+    And el motor de fraude evalúa la operación sin generar alertas bloqueantes
+    Then el saldo de la billetera del usuario se incrementa en el monto confirmado
+    And se publica el evento DepositCompleted
+    And el usuario recibe notificación del depósito acreditado
+
+  # --- Escenario de error ---
+  Scenario: Depósito rechazado por firma inválida en la notificación de la entidad financiera
+    Given una notificación de confirmación de depósito recibida del canal externo
+    When la firma digital de la notificación no coincide con la esperada
+    Then el sistema rechaza la notificación sin modificar el saldo de ninguna billetera
+    And no se emite ningún evento de dominio relacionado con el depósito
+```
+
+```gherkin
+Feature: Detección de Fraude y AML
+# Valida: AC-007
+
+  # --- Escenario de éxito ---
+  Scenario: Analista aprueba operación marcada como sospechosa y el sistema la libera
+    Given una operación financiera en estado Pendiente de revisión por alerta de fraude
+    And el Analista de Fraude ha revisado el detalle de la operación y el historial del usuario
+    When el Analista de Fraude aprueba la operación
+    Then el sistema libera la operación para su ejecución
+    And registra la resolución de forma inmutable en la Traza de Auditoría
+    And el usuario recibe notificación del resultado
+
+  # --- Escenario de error ---
+  Scenario: Motor de riesgo bloquea automáticamente una operación con nivel de riesgo Crítico
+    Given un usuario con cuenta activa que solicita una operación financiera
+    When el motor de riesgo clasifica la operación con Nivel de Riesgo Crítico
+    Then la operación es bloqueada automáticamente sin ejecutar ningún débito ni crédito
+    And se genera una alerta de alta prioridad para el Analista de Fraude
+    And el estado de la operación queda en Bloqueado pendiente de revisión manual
 ```
