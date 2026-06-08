@@ -13,8 +13,8 @@ Etapa 0 — Requerimiento del cliente              ✓ completada
 Etapa 1 — Planeación (PID)                       ✓ completada
 Etapa 2 — Análisis de Requerimientos (SRS)        ✓ completada
 Etapa 2b — Contexto Arquitectónico (ADC)          ✓ completada
-Etapa 3 — Pre-Diseño (Strategic SDD)              ← próximo paso
-Etapa 4 — Diseño Técnico (Technical SDD)
+Etapa 3 — Pre-Diseño (Strategic SDD)              ✓ completada
+Etapa 4 — Diseño Técnico (Technical SDD)          ← próximo paso
 Etapa 5 — Implementación
 ```
 
@@ -137,12 +137,42 @@ Etapa 5 — Implementación
 
 ---
 
+## Etapa 3 — Pre-Diseño Estratégico (Strategic SDD)
+
+### Proceso
+
+1. Se ejecuta la skill `/strategic-design-sdd` con el SRS y el ADC como entradas.
+2. Los tres documentos SDD generados se guardan en `docs/strategic-design/`.
+3. Este conjunto de documentos sirve como entrada para la skill `/technical-design-sdd` en la siguiente etapa.
+
+### Artefactos generados
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/strategic-design/SDD-PagoFacil-domain.md`](docs/strategic-design/SDD-PagoFacil-domain.md) | Dominio y Comportamiento — ubiquitous language, bounded contexts, context map, modelos de dominio, eventos, workflows y escenarios BDD |
+| [`docs/strategic-design/SDD-PagoFacil-security.md`](docs/strategic-design/SDD-PagoFacil-security.md) | Diseño de Seguridad — modelo de seguridad, threat modeling STRIDE y trust boundaries |
+| [`docs/strategic-design/SDD-PagoFacil-architecture.md`](docs/strategic-design/SDD-PagoFacil-architecture.md) | Estrategia Arquitectónica — drivers arquitectónicos, decisiones estratégicas (DS-xxx), riesgos, tradeoffs y próximos pasos |
+
+### Resumen del Strategic SDD
+
+| Campo | Valor |
+|-------|-------|
+| **Bounded contexts** | 7 — Identity, Wallet, Fraud & Compliance, Notification, Integration, Audit, Reporting |
+| **Eventos de dominio** | 12 (incluye eventos de compensación de sagas y eventos de fallo del pipeline ETL) |
+| **Flujos de saga** | 3 — Depósito, Transferencia entre usuarios, Retiro de fondos |
+| **Sistemas externos con ACL** | 5 — Proveedor KYC, Entidades Financieras, Pasarelas de Pago, Proveedor AML, SMS/Email |
+| **Decisiones estratégicas** | 10 — DS-001 a DS-008 + DS-CQRS-1/2/3 (stack y decisiones previas del ADC incorporadas) |
+| **Amenazas STRIDE identificadas** | 15 ordenadas por impacto descendente |
+| **Riesgos arquitectónicos** | 8 con plan de mitigación |
+
+---
+
 ## Próximo paso
 
-Con el SRS y el ADC generados, ejecutar la skill de pre-diseño estratégico:
+Con el Strategic SDD generado, ejecutar la skill de diseño técnico:
 
 ```
-/strategic-design-sdd docs/requirements/SRS-PagoFacil.md docs/planning/ADC-PagoFacil.md
+/technical-design-sdd docs/strategic-design/
 ```
 
-Esto generará el **Strategic Design Document (SDD)** en `docs/strategic-design/`.
+Esto generará el **Technical Design Document** en `docs/design/`.
