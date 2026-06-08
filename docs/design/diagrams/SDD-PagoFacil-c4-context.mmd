@@ -1,0 +1,30 @@
+C4Context
+    title PagoFacil — Diagrama de Contexto (C4 Nivel 1)
+
+    Person(usuarioFinal, "Usuario Final", "Usuario registrado que gestiona su billetera digital: depósitos, transferencias y retiros")
+    Person(administrador, "Administrador", "Gestiona cuentas de usuario, límites transaccionales y configuración del sistema")
+    Person(analistaFraude, "Analista de Fraude", "Revisa y resuelve alertas de fraude y AML desde el dashboard")
+    Person(oficialCumplimiento, "Oficial de Cumplimiento", "Aprueba excepciones AML, escala alertas críticas y descarga reportes regulatorios")
+
+    System(pagofacil, "PagoFacil", "Plataforma fintech de billetera digital multitenancy. Onboarding KYC/AML, operaciones financieras con garantías ACID, controles de compliance en tiempo real y reportería regulatoria (ROS/SAR, volumen transaccional, alertas AML).")
+
+    System_Ext(proveedorKYC, "Proveedor KYC", "Validación biométrica y documental de identidad de usuarios")
+    System_Ext(proveedorAML, "Proveedor AML", "Consulta de listas de sanciones nacionales e internacionales")
+    System_Ext(entidadesFinancieras, "Entidades Financieras", "Procesamiento de depósitos, retiros y liquidaciones bancarias")
+    System_Ext(pasarelas, "Pasarelas de Pago", "Recepción de notificaciones de pago firmadas digitalmente")
+    System_Ext(proveedorSMSEmail, "Proveedor SMS/Email", "Envío transaccional de OTP, confirmaciones de operación y alertas de seguridad")
+
+    Rel(usuarioFinal, pagofacil, "Onboarding, autenticación MFA y operaciones financieras", "HTTPS")
+    Rel(administrador, pagofacil, "Gestión de cuentas y consulta de auditoría", "HTTPS")
+    Rel(analistaFraude, pagofacil, "Revisión y resolución de alertas de fraude", "HTTPS")
+    Rel(oficialCumplimiento, pagofacil, "Aprobación de excepciones AML y descarga de reportes", "HTTPS")
+
+    Rel(pagofacil, proveedorKYC, "Solicita validación de identidad (datos mínimos)", "HTTPS / OAuth 2.0")
+    Rel(proveedorKYC, pagofacil, "Notifica resultado KYC vía webhook firmado", "Webhook HTTPS")
+    Rel(pagofacil, proveedorAML, "Consulta listas de sanciones en tiempo real", "HTTPS / API Key")
+    Rel(entidadesFinancieras, pagofacil, "Notifica confirmaciones de depósito y resultado de retiro", "HTTPS / OAuth 2.0")
+    Rel(pagofacil, entidadesFinancieras, "Solicita procesamiento de retiros bancarios", "HTTPS / OAuth 2.0")
+    Rel(pasarelas, pagofacil, "Notifica pagos con firma digital (webhook)", "Webhook HTTPS")
+    Rel(pagofacil, proveedorSMSEmail, "Envía OTP, confirmaciones y alertas de seguridad", "HTTPS / API Key")
+
+    UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="1")

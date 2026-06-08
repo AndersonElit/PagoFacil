@@ -14,8 +14,8 @@ Etapa 1 — Planeación (PID)                       ✓ completada
 Etapa 2 — Análisis de Requerimientos (SRS)        ✓ completada
 Etapa 2b — Contexto Arquitectónico (ADC)          ✓ completada
 Etapa 3 — Pre-Diseño (Strategic SDD)              ✓ completada
-Etapa 4 — Diseño Técnico (Technical SDD)          ← próximo paso
-Etapa 5 — Implementación
+Etapa 4 — Diseño Técnico (Technical SDD)          ✓ completada
+Etapa 5 — Implementación                          ← próximo paso
 ```
 
 ---
@@ -167,12 +167,56 @@ Etapa 5 — Implementación
 
 ---
 
+## Etapa 4 — Diseño Técnico (Technical SDD)
+
+### Proceso
+
+1. Se ejecuta la skill `/technical-design-sdd` con los documentos del Strategic SDD como entrada.
+2. Los tres documentos SDD técnicos y los artefactos independientes se guardan en `docs/design/`.
+3. Este conjunto de documentos sirve como entrada para la skill `/development-plan` en la siguiente etapa.
+
+### Artefactos generados
+
+**Documentos principales:**
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/design/SDD-PagoFacil-system.md`](docs/design/SDD-PagoFacil-system.md) | Arquitectura del Sistema — estilo arquitectónico, stack tecnológico, componentes por bounded context y diseño de módulos |
+| [`docs/design/SDD-PagoFacil-design.md`](docs/design/SDD-PagoFacil-design.md) | Diseño Técnico — APIs, persistencia (Database-per-Service), flujos de sagas, pipeline ETL y seguridad técnica |
+| [`docs/design/SDD-PagoFacil-infrastructure.md`](docs/design/SDD-PagoFacil-infrastructure.md) | Infraestructura y Gobernanza — ambientes, deployment, observabilidad, ADRs y riesgos técnicos |
+
+**Artefactos independientes:**
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/design/diagrams/SDD-PagoFacil-c4-context.mmd`](docs/design/diagrams/SDD-PagoFacil-c4-context.mmd) | Diagrama C4 Nivel 1 — contexto del sistema con actores y sistemas externos |
+| [`docs/design/diagrams/SDD-PagoFacil-c4-container.mmd`](docs/design/diagrams/SDD-PagoFacil-c4-container.mmd) | Diagrama C4 Nivel 2 — contenedores internos, bases de datos, mensajería y capa serverless |
+| [`docs/design/api/SDD-PagoFacil-openapi.yaml`](docs/design/api/SDD-PagoFacil-openapi.yaml) | Especificación OpenAPI 3.0 — 30+ endpoints REST por bounded context, incluyendo endpoints de compensación de saga |
+| [`docs/design/database/SDD-PagoFacil-schema.sql`](docs/design/database/SDD-PagoFacil-schema.sql) | DDL PostgreSQL — esquema de 7 bases de datos (write models, read model CQRS, reporting), tablas de saga, outbox e idempotencia |
+| [`docs/design/database/SDD-PagoFacil-collections.js`](docs/design/database/SDD-PagoFacil-collections.js) | Colecciones MongoDB — BC-06 audit-service, modo append-only con validadores `$jsonSchema` |
+
+### Resumen del Technical SDD
+
+| Campo | Valor |
+|-------|-------|
+| **Microservicios** | 9 — identity, wallet, fraud-compliance, notification, integration, audit, projection, report-extraction (MS1), report-processing (MS2) |
+| **Bases de datos** | 8 — 6 PostgreSQL operacionales + `pagofacil_readmodel` + `pagofacil_reporting` + MongoDB audit |
+| **Patrón de persistencia** | Database-per-Service; migraciones con Liquibase standalone; changelogs en repo `pagofacil-migrations` en Gitea |
+| **Sagas documentadas** | 3 — Depósito, Transferencia, Retiro; con tabla de pasos, compensaciones e idempotencia |
+| **ADRs técnicos** | 9 — Database-per-Service, override MongoDB→PostgreSQL (ADR-002), Camel ACL, Narayana LRA, Transactional Outbox, CQRS Projection Service, Spark CronJob, Lambda serverless, CQRS read model |
+| **Pipeline ETL** | MS1 (Spark JDBC → Parquet raw/) → MS2 (Factory por ReportType → Parquet processed/) → Lambda (PDF/XLS/CSV) |
+| **Infraestructura** | K3s + systemd en VPS (dev) / EKS + RDS + MSK (staging/prod); Terraform vía `base-infrastructure-builder.sh` |
+
+---
+
 ## Próximo paso
 
-Con el Strategic SDD generado, ejecutar la skill de diseño técnico:
+Con el Technical SDD generado, aprovisionar la infraestructura base y generar el plan de desarrollo:
 
-```
-/technical-design-sdd docs/strategic-design/
-```
+```bash
+# 1. Aprovisionar infraestructura base
+bash .claude/scripts/base-infrastructure-builder.sh
 
-Esto generará el **Technical Design Document** en `docs/design/`.
+# 2. Generar plan de desarrollo
+/development-plan docs/design/
+```
