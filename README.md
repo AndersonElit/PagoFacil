@@ -9,10 +9,11 @@ Proyecto de desarrollo de una plataforma de billetera digital segura, escalable 
 Este repositorio sigue un framework de ciclo de vida de desarrollo de software (SDLC) asistido por Claude Code. Cada etapa produce artefactos estructurados que alimentan la siguiente, garantizando trazabilidad desde el requerimiento inicial hasta la implementación.
 
 ```
-Etapa 0 — Requerimiento del cliente    ✓ completada
-Etapa 1 — Planeación (PID)             ✓ completada
-Etapa 2 — Análisis de Requerimientos (SRS)  ← estamos aquí
-Etapa 3 — Pre-Diseño (Strategic SDD)
+Etapa 0 — Requerimiento del cliente              ✓ completada
+Etapa 1 — Planeación (PID)                       ✓ completada
+Etapa 2 — Análisis de Requerimientos (SRS)        ✓ completada
+Etapa 2b — Contexto Arquitectónico (ADC)          ✓ completada
+Etapa 3 — Pre-Diseño (Strategic SDD)              ← próximo paso
 Etapa 4 — Diseño Técnico (Technical SDD)
 Etapa 5 — Implementación
 ```
@@ -82,7 +83,7 @@ Etapa 5 — Implementación
 
 1. Se ejecuta la skill `/requirements-srs` con el PID como entrada.
 2. El SRS generado se guarda en `docs/requirements/`.
-3. Este documento sirve como entrada para la skill `/strategic-design-sdd` en la siguiente etapa.
+3. Este documento sirve como entrada para el ADC en la siguiente etapa.
 
 ### Artefacto generado
 
@@ -103,12 +104,45 @@ Etapa 5 — Implementación
 
 ---
 
+## Etapa 2b — Contexto Arquitectónico (ADC)
+
+### Proceso
+
+1. Se diligencia el formato base ubicado en `.claude/formatos/input-adc-template.md` apoyándose en el SRS y en el stack soportado por `.claude/scripts/` y `.claude/templates/`.
+2. El ADC completado se guarda en `docs/planning/`.
+3. Este documento se pasa junto al SRS como entrada para la skill `/strategic-design-sdd` en la siguiente etapa.
+
+### Artefacto generado
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/planning/ADC-PagoFacil.md`](docs/planning/ADC-PagoFacil.md) | Architectural Decision Context — define stack mandatorio, infraestructura, estilo arquitectónico, SLAs, compliance, integraciones y decisiones previas tomadas |
+
+### Resumen del ADC
+
+| Campo | Valor |
+|-------|-------|
+| **Backend** | Java 21 + Spring Boot 3 WebFlux (hexagonal, reactivo) |
+| **ETL / Reportería** | Scala 3 + Apache Spark + AWS Lambda + EventBridge |
+| **Integración** | Apache Camel 4 (`integration-service`) + Narayana LRA (sagas) |
+| **Frontend** | Next.js 14 (TypeScript, App Router) |
+| **BD write model** | PostgreSQL 16 (ACID, Liquibase) |
+| **BD read model** | PostgreSQL 16 — `pagofacil_readmodel` (ADR-002, override de MongoDB) |
+| **Mensajería** | Apache Kafka 3 KRaft |
+| **Auth** | AWS Cognito + OAuth 2.0 / OIDC |
+| **K8s** | K3s en VPS (dev) / EKS (staging-prod) |
+| **CI/CD** | Jenkins + ArgoCD + SonarQube + Gitea |
+| **Observabilidad** | OpenTelemetry + Prometheus + Grafana + Jaeger + Fluent Bit |
+| **Compliance** | KYC/AML obligatorio, GDPR por verificar, retención regulatoria de datos financieros |
+
+---
+
 ## Próximo paso
 
-Con el SRS generado, ejecutar la skill de pre-diseño estratégico:
+Con el SRS y el ADC generados, ejecutar la skill de pre-diseño estratégico:
 
 ```
-/strategic-design-sdd
+/strategic-design-sdd docs/requirements/SRS-PagoFacil.md docs/planning/ADC-PagoFacil.md
 ```
 
 Esto generará el **Strategic Design Document (SDD)** en `docs/strategic-design/`.
