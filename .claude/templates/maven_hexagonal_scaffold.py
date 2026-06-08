@@ -80,7 +80,7 @@ spring:
   cloud:
     aws:
       secretsmanager:
-        endpoint: http://localhost:4566
+        endpoint: ${SM_ENDPOINT:http://localhost:4566}
       credentials:
         access-key: test
         secret-key: test
@@ -99,20 +99,20 @@ def get_secrets_setup_content(project_name: str, database: str, messaging_system
 
     secret: dict = {"SERVER_PORT": str(port)}
     if database.lower() == "mongo":
-        secret["MONGODB_URI"] = f"mongodb://localhost:27017/{mongo_db}"
+        secret["MONGODB_URI"] = f"mongodb://${{VPS_IP:-localhost}}:27017/{mongo_db}"
     else:
-        secret["R2DBC_URL"] = f"r2dbc:postgresql://localhost:${{RDS_PORT:-5432}}/{pg_db}"
+        secret["R2DBC_URL"] = f"r2dbc:postgresql://${{VPS_IP:-localhost}}:5432/{pg_db}"
         secret["DB_USERNAME"] = org or "appuser"
         secret["DB_PASSWORD"] = "change_me"
 
     if messaging_system.lower() in ("rabbit-producer", "rabbit-consumer"):
-        secret["RABBITMQ_HOST"] = "localhost"
+        secret["RABBITMQ_HOST"] = "${VPS_IP:-localhost}"
         secret["RABBITMQ_PORT"] = "5672"
         secret["RABBITMQ_USERNAME"] = "guest"
         secret["RABBITMQ_PASSWORD"] = "guest"
 
     if messaging_system.lower() in ("kafka-producer", "kafka-consumer"):
-        secret["KAFKA_BOOTSTRAP_SERVERS"] = "localhost:9092"
+        secret["KAFKA_BOOTSTRAP_SERVERS"] = "${VPS_IP:-localhost}:29092"
 
     if messaging_system.lower() == "kafka-consumer":
         secret["KAFKA_CONSUMER_GROUP_ID"] = f"{project_name}-group"
@@ -120,11 +120,12 @@ def get_secrets_setup_content(project_name: str, database: str, messaging_system
     secret_json = json.dumps(secret)
     return f"""\
 #!/usr/bin/env bash
-# Crea (o actualiza) el secret de desarrollo en floci (emulador AWS).
-# Requiere que floci esté corriendo en http://localhost:4566.
+# Crea (o actualiza) el secret de desarrollo en floci (VPS).
+# Requiere que floci esté corriendo en $VPS_IP:4566 (o localhost:4566 por defecto).
+# Uso: VPS_IP=192.168.122.50 bash create-secrets-dev.sh
 
 SECRET_NAME="{org}/dev/{project_name}"
-ENDPOINT="http://localhost:4566"
+ENDPOINT="${{FLOCI_ENDPOINT:-http://localhost:4566}}"
 REGION="us-east-1"
 
 if aws --endpoint-url="$ENDPOINT" secretsmanager describe-secret \\
@@ -223,13 +224,12 @@ def get_jenkinsfile_content(project_name: str, database: str, org: str = "myproj
 //
 // Modelo de agentes: Kubernetes plugin. Todo el pipeline corre en un único pod
 // efímero (definido en org/__LIB_ORG__/podBackend.yaml de la Shared Library) en
-// el cluster del ambiente: EKS en staging/prod, K3d en dev. El workspace se
-// comparte entre stages sin stash/unstash. El pod usa el ServiceAccount
-// 'jenkins-agent': IRSA para kaniko→ECR en staging/prod; en dev kaniko empuja al
-// registry de k3d (HTTP). El despliegue NO ocurre aquí: este pipeline es CI y su frontera
-// con el CD es escribir el nuevo image tag en Git (bumpImageTag). El CD lo hace
-// ArgoCD por GitOps (auto-sync en dev/staging; sync manual en prod). Ver el
-// módulo Terraform 'argocd'.
+// el cluster del ambiente: K3s nativo en VPS en dev, EKS en staging/prod. El workspace
+// se comparte entre stages sin stash/unstash. El pod usa el ServiceAccount
+// 'jenkins-agent': IRSA para kaniko en staging/prod; en dev kaniko empuja al
+// Gitea Package Registry (HTTP). El despliegue NO ocurre aquí: este pipeline es CI y su
+// frontera con el CD es escribir el nuevo image tag en Git (bumpImageTag). El CD lo hace
+// ArgoCD por GitOps (auto-sync en dev/staging; sync manual en prod).
 // ───────────────────────────────────────────────────────────────────────────
 
 pipeline {
@@ -251,7 +251,7 @@ pipeline {
         string(
             name: 'SERVICE_NAME',
             defaultValue: '__SERVICE_NAME__',
-            description: 'Nombre del microservicio (deriva el repo ECR y el deployment).'
+            description: 'Nombre del microservicio (deriva el repo en Gitea Package Registry y el deployment).'
         )
         choice(
             name: 'DEPLOY_ENV',
@@ -263,7 +263,7 @@ pipeline {
     environment {
         SERVICE_NAME  = "${params.SERVICE_NAME}"
         DEPLOY_ENV    = "${params.DEPLOY_ENV}"
-        ECR_REPO      = "${params.SERVICE_NAME}"
+        IMAGE_REPO    = "${params.SERVICE_NAME}"
         K8S_NAMESPACE = "${params.DEPLOY_ENV}"
         DB_TYPE       = '__DB_TYPE__'
     }
@@ -308,20 +308,20 @@ pipeline {
             steps { runSecurityScans() }
         }
 
-        // 6 — Imagen Docker multi-stage vía Kaniko → push a Amazon ECR.
+        // 6 — Imagen Docker multi-stage vía Kaniko → push a Gitea Package Registry.
         stage('Build & Push Image') {
             steps {
                 buildAndPushImage(
-                    service:  env.SERVICE_NAME,
-                    ecrRepo:  env.ECR_REPO,
-                    imageTag: env.IMAGE_TAG
+                    service:   env.SERVICE_NAME,
+                    imageRepo: env.IMAGE_REPO,
+                    imageTag:  env.IMAGE_TAG
                 )
             }
         }
 
         // 7 — Escaneo de la imagen publicada (Trivy). Falla ante CVE crítico.
         stage('Image Scan (Trivy)') {
-            steps { scanImage(ecrRepo: env.ECR_REPO, imageTag: env.IMAGE_TAG) }
+            steps { scanImage(imageRepo: env.IMAGE_REPO, imageTag: env.IMAGE_TAG) }
         }
 
         // 8 — Frontera CI → CD. Escribe image.repository/tag en
@@ -1410,14 +1410,18 @@ public class CompensationController {{
 
 
 def write_liquibase_structure(root: Path, project_name: str, pg_db_prefix: str,
-                               outbox: bool, saga_participant: bool) -> None:
-    """Genera db/<project_name>/changelog/ en la raíz del repo (Liquibase standalone).
+                               outbox: bool, saga_participant: bool,
+                               migrations_dir: str = "") -> None:
+    """Genera <migrations_dir>/<project_name>/changelog/ (Liquibase standalone).
 
     Flyway requiere JDBC bloqueante — incompatible con servicios R2DBC. Liquibase corre
-    como proceso independiente (Docker) antes del despliegue; no va en el classpath del JAR.
-    root = Path(project_name), cwd = backend/ → db/ vive en ../../db/ = REPO_ROOT/db/.
+    como proceso independiente antes del despliegue; no va en el classpath del JAR.
+    Si migrations_dir está vacío usa REPO_ROOT/db/ (root.parent.parent / "db").
     """
-    db_svc_dir = root.parent.parent / "db" / project_name
+    if migrations_dir:
+        db_svc_dir = Path(migrations_dir) / project_name
+    else:
+        db_svc_dir = root.parent.parent / "db" / project_name
     changelog_dir = db_svc_dir / "changelog"
     changelog_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1425,7 +1429,7 @@ def write_liquibase_structure(root: Path, project_name: str, pg_db_prefix: str,
     db_name = f"{pg_db_prefix}_{svc_slug}" if pg_db_prefix else svc_slug
 
     (db_svc_dir / "liquibase.properties").write_text(
-        f"url=jdbc:postgresql://localhost:${{RDS_PORT}}/{db_name}\n"
+        f"url=jdbc:postgresql://${{VPS_IP:-localhost}}:5432/{db_name}\n"
         f"username=${{DB_USERNAME}}\n"
         f"password=${{DB_PASSWORD}}\n"
         "changeLogFile=changelog/root.yaml\n"
@@ -1507,7 +1511,8 @@ def write_liquibase_structure(root: Path, project_name: str, pg_db_prefix: str,
 
 def scaffold(project_name: str, database: str, messaging_system: str, port: int = 8080,
              org: str = "myproject", outbox: bool = False, saga_participant: bool = False,
-             pg_db_prefix: str = "", mongo_db_prefix: str = "") -> None:
+             pg_db_prefix: str = "", mongo_db_prefix: str = "",
+             migrations_dir: str = "") -> None:
     safe_name = project_name.replace("-", "")
     root = Path(project_name)
     logger.info("Creando proyecto: %s (db=%s, messaging=%s, port=%d, outbox=%s, saga_participant=%s)",
@@ -1651,7 +1656,8 @@ public class ApplicationConfig {{
     if saga_participant:
         create_compensation_controller(root, safe_name)
     if database.lower() != "mongo":
-        write_liquibase_structure(root, project_name, pg_db_prefix, outbox, saga_participant)
+        write_liquibase_structure(root, project_name, pg_db_prefix, outbox, saga_participant,
+                                  migrations_dir=migrations_dir)
 
     secrets_dir = root / "scripts"
     secrets_dir.mkdir(parents=True, exist_ok=True)
@@ -1719,15 +1725,17 @@ def _setup_gitea_repo(project_name: str, root: Path, org: str = "myproject") -> 
     import urllib.error
     import urllib.request
 
-    gitea_host = "http://localhost:3000"
+    import os
+    vps_ip = os.environ.get("VPS_IP", "")
+    gitea_host = f"http://{vps_ip}:3000" if vps_ip else "http://localhost:3000"
     credentials = base64.b64encode(b"gitea-admin:gitea-admin").decode()
 
     try:
         urllib.request.urlopen(f"{gitea_host}/api/healthz", timeout=3)
     except Exception:
         logger.warning(
-            "[Gitea] No activo en %s — crear el repo manualmente tras correr "
-            "base-infrastructure-builder.sh.", gitea_host
+            "[Gitea] No activo en %s — pasar VPS_IP=<IP> o crear repo manualmente "
+            "tras correr base-infrastructure-builder.sh --vps-ip.", gitea_host
         )
         return
 
@@ -1770,7 +1778,7 @@ def _setup_gitea_repo(project_name: str, root: Path, org: str = "myproject") -> 
         remote_url = f"{gitea_host}/{org}/{project_name}.git"
         subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=root, check=False)
         logger.info("[Gitea] Remote 'origin' → %s", remote_url)
-        logger.info("[Gitea] URL interna (Jenkins/ArgoCD): http://gitea:3000/%s/%s.git", org, project_name)
+        logger.info("[Gitea] URL para Jenkins/ArgoCD: %s/%s/%s.git", gitea_host, org, project_name)
         # Auto-push con credenciales embebidas (sin guardarlas en .git/config).
         push_url = remote_url.replace("http://", "http://gitea-admin:gitea-admin@", 1)
         push = subprocess.run(
@@ -1790,7 +1798,7 @@ def _update_argocd_applicationset(service_name: str, org: str = "myproject") -> 
     sentinel = "          # -- services managed by scaffold --\n"
     entry = (
         f"          - service: {service_name}\n"
-        f"            repoURL: http://gitea:3000/{org}/{service_name}.git\n"
+        f"            repoURL: {gitea_host}/{org}/{service_name}.git\n"
         f"            revision: main\n"
     )
 
@@ -1940,6 +1948,9 @@ def main() -> None:
     parser.add_argument("--saga-participant", action="store_true",
                         help="Marca el servicio como participante de una saga: genera el "
                              "endpoint de compensación idempotente y la tabla processed_message.")
+    parser.add_argument("--migrations-dir", default="", metavar="PATH",
+                        help="Ruta absoluta al repositorio de migraciones Liquibase. "
+                             "Si se omite, los changelogs se generan en <repo_root>/db/.")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Mostrar logs detallados (DEBUG)")
 
@@ -1956,7 +1967,8 @@ def main() -> None:
     try:
         scaffold(args.service_name, args.database, args.messaging_system, args.port, args.org,
                  outbox=args.outbox, saga_participant=args.saga_participant,
-                 pg_db_prefix=args.pg_db, mongo_db_prefix=args.mongo_db)
+                 pg_db_prefix=args.pg_db, mongo_db_prefix=args.mongo_db,
+                 migrations_dir=args.migrations_dir)
     except OSError as e:
         logger.error("No se pudo crear el proyecto: %s", e)
         sys.exit(1)

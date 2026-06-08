@@ -30,31 +30,36 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 TF_DEV_DIR="$REPO_ROOT/terraform/backend/environments/dev"
-FLOCI_ENDPOINT="${FLOCI_ENDPOINT:-http://localhost:4566}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-AWS_CMD="aws --endpoint-url=$FLOCI_ENDPOINT --region $AWS_REGION"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 0. Parámetros
 # ──────────────────────────────────────────────────────────────────────────────
 PROJECT_NAME=""
+VPS_IP=""
+VPS_USER="${VPS_USER:-ubuntu}"
+VPS_SSH_KEY="${VPS_SSH_KEY:-$HOME/.ssh/id_ed25519}"
+
 usage() {
   cat <<USAGE
-Uso: $0 -P <proyecto>
+Uso: $0 -P <proyecto> --vps-ip <IP>
 
   -P, --project NOMBRE   Slug del proyecto (el mismo usado en
-                         base-infrastructure-builder.sh). Determina el nombre
-                         del cluster K3d (<proyecto>-dev), el contenedor Kafka
-                         (<proyecto>-kafka-dev) y la base PostgreSQL de dev
-                         (<proyecto>_dev). (obligatorio)
+                         base-infrastructure-builder.sh). (obligatorio)
+  --vps-ip IP            IP del VPS donde corren los servicios systemd
+                         y K3s nativo.                                (obligatorio)
 USAGE
   exit "${1:-0}"
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -P|--project) PROJECT_NAME="${2:-}"; shift 2 ;;
-    --project=*)  PROJECT_NAME="${1#*=}"; shift ;;
-    -h|--help)    usage 0 ;;
+    -P|--project)  PROJECT_NAME="${2:-}"; shift 2 ;;
+    --project=*)   PROJECT_NAME="${1#*=}"; shift ;;
+    --vps-ip)      VPS_IP="${2:-}";       shift 2 ;;
+    --vps-ip=*)    VPS_IP="${1#*=}";      shift ;;
+    --vps-user)    VPS_USER="${2:-}";     shift 2 ;;
+    --vps-ssh-key) VPS_SSH_KEY="${2:-}";  shift 2 ;;
+    -h|--help)     usage 0 ;;
     *) log_err "Argumento desconocido: $1"; usage 1 ;;
   esac
 done
@@ -62,9 +67,18 @@ if [[ -z "$PROJECT_NAME" ]]; then
   log_err "Falta el parámetro obligatorio -P/--project."
   usage 1
 fi
-KAFKA_CONTAINER="${PROJECT_NAME}-kafka-dev"
-SONAR_CONTAINER="${PROJECT_NAME}-sonarqube"
-K3D_CLUSTER="${PROJECT_NAME}-dev"
+if [[ -z "$VPS_IP" ]]; then
+  log_err "Falta el parámetro obligatorio --vps-ip."
+  usage 1
+fi
+
+FLOCI_ENDPOINT="http://${VPS_IP}:4566"
+AWS_CMD="aws --endpoint-url=$FLOCI_ENDPOINT --region $AWS_REGION"
+
+ssh_vps() { ssh -i "$VPS_SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+              -o BatchMode=yes "${VPS_USER}@${VPS_IP}" "$@"; }
+
+K3S_CLUSTER="k3s-${PROJECT_NAME}-dev"
 PG_DB_NAME="${PROJECT_NAME}_dev"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -91,35 +105,34 @@ else
   log_ok "aws encontrado ($(command -v aws))."
 fi
 
-if ! command -v docker &>/dev/null; then
-  log_err "Docker no está instalado. Abortando."
-  exit 1
-fi
-log_ok "docker encontrado ($(command -v docker))."
+log "Verificando conectividad SSH al VPS ($VPS_IP)..."
+ssh_vps "echo OK" &>/dev/null \
+  || { log_err "No se puede conectar al VPS $VPS_IP via SSH."; exit 1; }
+log_ok "VPS $VPS_IP accesible."
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. Verificar que floci y contenedores de soporte estén corriendo
+# 2. Verificar servicios systemd en VPS
 # ──────────────────────────────────────────────────────────────────────────────
-HEADER "2. Verificando contenedores de soporte en floci-net"
+HEADER "2. Verificando servicios systemd en VPS ($VPS_IP)"
 
-CONTAINERS_EXPECTED=("floci" "floci-mongo" "$KAFKA_CONTAINER" "gitea" "$SONAR_CONTAINER")
+SERVICES_EXPECTED=("mongod" "kafka" "gitea" "sonarqube" "jenkins")
 ALL_UP=1
 
-for c in "${CONTAINERS_EXPECTED[@]}"; do
-  if docker ps --filter "name=$c" --filter "network=floci-net" --format '{{.Names}}' | grep -qx "$c"; then
+for c in "${SERVICES_EXPECTED[@]}"; do
+  if ssh_vps "systemctl is-active --quiet '$c'" 2>/dev/null; then
     log_ok "Contenedor $c: UP en floci-net."
   else
-    log_err "Contenedor $c NO está corriendo en floci-net."
+    log_err "Servicio $c NO activo en VPS $VPS_IP."
     ALL_UP=0
   fi
 done
 
 if [[ "$ALL_UP" -eq 0 ]]; then
-  log_err "Faltan contenedores de soporte. Ejecute primero: bash .claude/scripts/base-infrastructure-builder.sh"
+  log_err "Faltan servicios en el VPS. Ejecute primero: vps-setup.sh services --vm-ip $VPS_IP"
   exit 1
 fi
 
-log_ok "Todos los contenedores de soporte están UP."
+log_ok "Todos los servicios systemd están activos en VPS."
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 3. Verificar salud del emulador floci
@@ -127,11 +140,12 @@ log_ok "Todos los contenedores de soporte están UP."
 HEADER "3. Salud del emulador floci"
 
 if curl -sf "$FLOCI_ENDPOINT/_localstack/health" > /tmp/floci-health.json 2>/dev/null; then
-  log "Servicios disponibles en floci:"
+  log "Servicios disponibles en floci ($VPS_IP:4566):"
   jq -r '.services | to_entries[] | "  \(.key): \(.value)"' /tmp/floci-health.json
   rm -f /tmp/floci-health.json
 else
   log_err "floci no responde en $FLOCI_ENDPOINT/_localstack/health"
+  log_err "  Ejecuta en VPS: floci start  o  docker start floci"
   exit 1
 fi
 
@@ -179,16 +193,15 @@ log_ok "terraform plan completado."
 # 7. Terraform apply
 # ──────────────────────────────────────────────────────────────────────────────
 HEADER "7. terraform apply"
-log_warn "Aplicando infraestructura dev con floci + K3d..."
-# En dev NO se usa EKS: el cluster Kubernetes es K3d ($K3D_CLUSTER), creado por
-# base-infrastructure-builder.sh (floci-start). Los providers kubernetes/helm leen
-# .kube/config-k3d, así que el cluster debe existir antes de este apply. El módulo
-# 'argocd' instala ArgoCD en K3d vía Helm en el mismo apply (sin -target).
-if ! kubectl --kubeconfig "$TF_DEV_DIR/.kube/config-k3d" get nodes &>/dev/null; then
-  log_err "El cluster K3d $K3D_CLUSTER no responde. Ejecutá primero base-infrastructure-builder.sh."
+log_warn "Aplicando infraestructura dev con floci + K3s (VPS nativo)..."
+# En dev NO se usa EKS: el cluster Kubernetes es K3s nativo en el VPS ($VPS_IP:6443).
+# ArgoCD ya fue instalado via Helm (vps-setup.sh k3s). Terraform aplica solo los
+# recursos floci: Cognito, API Gateway, Secrets Manager, IAM.
+if ! kubectl --kubeconfig "$TF_DEV_DIR/.kube/config-k3s" get nodes &>/dev/null 2>&1; then
+  log_err "El cluster K3s en VPS no responde. Ejecutá primero base-infrastructure-builder.sh con --vps-ip $VPS_IP."
   exit 1
 fi
-log_ok "Cluster K3d $K3D_CLUSTER accesible."
+log_ok "Cluster K3s ($K3S_CLUSTER) accesible en VPS $VPS_IP."
 
 (
   cd "$TF_DEV_DIR"
@@ -203,11 +216,11 @@ log_ok "terraform apply completado."
 HEADER "8. Verificando recursos emulados en floci"
 
 if command -v aws &>/dev/null; then
-  # ── ECR ──
-  if $AWS_CMD ecr describe-repositories --query 'repositories[].repositoryName' --output table 2>/dev/null; then
-    log_ok "ECR — repositorios listados."
+  # ── Gitea Package Registry (reemplaza ECR) ──
+  if curl -sf -u gitea-admin:gitea-admin "http://${VPS_IP}:3000/api/v1/packages/${PROJECT_NAME}" &>/dev/null; then
+    log_ok "Gitea Package Registry — accesible en http://${VPS_IP}:3000."
   else
-    log_warn "ECR — sin repositorios o falló la consulta."
+    log_warn "Gitea Package Registry — no responde aún (esperar a que Gitea esté UP)."
   fi
 
   # ── Cognito ──
@@ -230,24 +243,25 @@ fi
 # ──────────────────────────────────────────────────────────────────────────────
 # 8b. Verificación del cluster K3d + ArgoCD
 # ──────────────────────────────────────────────────────────────────────────────
-HEADER "8b. Verificando cluster K3d + ArgoCD"
+HEADER "8b. Verificando cluster K3s + ArgoCD en VPS ($VPS_IP)"
 
 if command -v kubectl &>/dev/null; then
-  KUBE="kubectl --kubeconfig $TF_DEV_DIR/.kube/config-k3d"
+  KUBE="kubectl --kubeconfig $TF_DEV_DIR/.kube/config-k3s"
   if $KUBE get nodes &>/dev/null; then
-    log_ok "K3d — nodos:"
+    log_ok "K3s (VPS nativo) — nodos:"
     $KUBE get nodes 2>/dev/null || true
   else
-    log_warn "K3d — el cluster no respondió."
+    log_warn "K3s — el cluster no respondió."
   fi
   if $KUBE get namespace argocd &>/dev/null; then
     log_ok "ArgoCD — namespace presente. Pods:"
     $KUBE -n argocd get pods 2>/dev/null || true
+    log "  UI: http://${VPS_IP}:30080"
   else
-    log_warn "ArgoCD — namespace 'argocd' no encontrado (¿terraform apply del módulo argocd?)."
+    log_warn "ArgoCD — namespace 'argocd' no encontrado. Ejecutar: vps-setup.sh k3s --vm-ip $VPS_IP"
   fi
 else
-  log_warn "kubectl no disponible; omitiendo verificación de K3d/ArgoCD."
+  log_warn "kubectl no disponible; omitiendo verificación de K3s/ArgoCD."
 fi
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -257,28 +271,23 @@ HEADER "9. Verificación de conectividad"
 
 FAILED=()
 
-# ── PostgreSQL (RDS emulado vía puerto dinámico) ──
-RDS_PORT=$(cd "$TF_DEV_DIR" && terraform output -raw rds_port 2>/dev/null || echo "")
-if [[ -n "$RDS_PORT" ]]; then
-  log "PostgreSQL en localhost:$RDS_PORT"
-  if command -v psql &>/dev/null; then
-    if PGPASSWORD=changeme123 psql "postgresql://admin:changeme123@localhost:$RDS_PORT/$PG_DB_NAME" -c '\conninfo' &>/dev/null; then
-      log_ok "PostgreSQL — conexión exitosa en localhost:$RDS_PORT."
-    else
-      log_err "PostgreSQL — falló la conexión en localhost:$RDS_PORT."
-      FAILED+=("PostgreSQL")
-    fi
+# ── PostgreSQL (nativo en VPS :5432) ──
+log "PostgreSQL en $VPS_IP:5432"
+if command -v psql &>/dev/null; then
+  if PGPASSWORD=changeme123 psql "postgresql://admin:changeme123@${VPS_IP}:5432/${PG_DB_NAME}" -c '\conninfo' &>/dev/null; then
+    log_ok "PostgreSQL — conexión exitosa en $VPS_IP:5432."
   else
-    log_warn "psql no instalado; omitiendo verificación PostgreSQL."
+    log_err "PostgreSQL — falló la conexión en $VPS_IP:5432."
+    FAILED+=("PostgreSQL")
   fi
 else
-  log_warn "rds_port no disponible; omitiendo verificación PostgreSQL."
+  log_warn "psql no instalado; omitiendo verificación PostgreSQL."
 fi
 
-# ── MongoDB ──
-log "MongoDB en localhost:27017"
+# ── MongoDB (nativo en VPS :27017) ──
+log "MongoDB en $VPS_IP:27017"
 if command -v mongosh &>/dev/null; then
-  if mongosh "mongodb://localhost:27017" --eval 'db.runCommand({ ping: 1 })' --quiet 2>/dev/null | grep -q '"ok" : 1'; then
+  if mongosh "mongodb://${VPS_IP}:27017" --eval 'db.runCommand({ ping: 1 })' --quiet 2>/dev/null | grep -q '"ok" : 1'; then
     log_ok "MongoDB — ping exitoso."
   else
     log_err "MongoDB — falló el ping."
@@ -288,17 +297,17 @@ else
   log_warn "mongosh no instalado; omitiendo verificación MongoDB."
 fi
 
-# ── Kafka ──
-log "Kafka en localhost:29092"
-if docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list &>/dev/null; then
-  log_ok "Kafka — respuesta del broker (lista de tópicos vacía esperada)."
+# ── Kafka (systemd en VPS) ──
+log "Kafka en $VPS_IP:9092"
+if ssh_vps "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list" &>/dev/null; then
+  log_ok "Kafka — respuesta del broker (lista de tópicos OK)."
 else
   log_err "Kafka — no responde."
   FAILED+=("Kafka")
 fi
 
 # ── Gitea ──
-if curl -sf http://localhost:3000/api/healthz &>/dev/null; then
+if curl -sf "http://${VPS_IP}:3000/api/healthz" &>/dev/null; then
   log_ok "Gitea — healthz OK."
 else
   log_err "Gitea — healthz falló."
@@ -325,23 +334,23 @@ HEADER "10. Outputs de Terraform"
   terraform output
 )
 
-HEADER "Tabla de endpoints locales"
+HEADER "Tabla de endpoints del VPS ($VPS_IP)"
 
 echo ""
-printf "  %-30s %-40s %s\n" "Recurso" "Endpoint host" "Puerto"
+printf "  %-30s %-40s %s\n" "Recurso" "Endpoint" "Puerto"
 printf "  %-30s %-40s %s\n" "------------------------------" "----------------------------------------" "-----"
-printf "  %-30s %-40s %s\n" "Emulador AWS floci" "$FLOCI_ENDPOINT" "4566"
-printf "  %-30s %-40s %s\n" \
-  "PostgreSQL (RDS emulado)" \
-  "localhost:${RDS_PORT:-(ver terraform output rds_port)}" \
-  "${RDS_PORT:-(ver output)}"
-printf "  %-30s %-40s %s\n" "MongoDB" "mongodb://localhost:27017" "27017"
-printf "  %-30s %-40s %s\n" "Kafka (host)" "localhost:29092" "29092"
-printf "  %-30s %-40s %s\n" "Kafka (floci-net)" "${KAFKA_CONTAINER}:9092" "9092"
-printf "  %-30s %-40s %s\n" "Gitea UI / API" "http://localhost:3000" "3000"
-printf "  %-30s %-40s %s\n" "Gitea SSH" "localhost:2222" "2222"
-printf "  %-30s %-40s %s\n" "SonarQube UI / API" "http://localhost:9000" "9000"
-printf "  %-30s %-40s %s\n" "SonarQube (floci-net)" "${SONAR_CONTAINER}:9000" "9000"
+printf "  %-30s %-40s %s\n" "Emulador AWS floci"      "http://${VPS_IP}:4566"             "4566"
+printf "  %-30s %-40s %s\n" "PostgreSQL nativo"        "${VPS_IP}:5432"                    "5432"
+printf "  %-30s %-40s %s\n" "MongoDB"                  "mongodb://${VPS_IP}:27017"         "27017"
+printf "  %-30s %-40s %s\n" "Kafka (externo)"          "${VPS_IP}:29092"                   "29092"
+printf "  %-30s %-40s %s\n" "Kafka (K3s pods)"         "${VPS_IP}:9092"                    "9092"
+printf "  %-30s %-40s %s\n" "Gitea UI / API"           "http://${VPS_IP}:3000"             "3000"
+printf "  %-30s %-40s %s\n" "Gitea Package Registry"   "http://${VPS_IP}:3000/${PROJECT_NAME}" "3000"
+printf "  %-30s %-40s %s\n" "Gitea SSH"                "${VPS_IP}:2222"                    "2222"
+printf "  %-30s %-40s %s\n" "SonarQube"                "http://${VPS_IP}:9000"             "9000"
+printf "  %-30s %-40s %s\n" "Jenkins"                  "http://${VPS_IP}:8080"             "8080"
+printf "  %-30s %-40s %s\n" "ArgoCD UI"                "http://${VPS_IP}:30080"            "30080"
+printf "  %-30s %-40s %s\n" "K3s API"                  "https://${VPS_IP}:6443"            "6443"
 echo ""
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -352,8 +361,8 @@ HEADER "Outputs individuales (para uso en otros scripts)"
 echo ""
 cd "$TF_DEV_DIR"
 
-echo "  # Puerto PostgreSQL"
-echo "  RDS_PORT=$(terraform output -raw rds_port 2>/dev/null || echo '<no disponible>')"
+echo "  # Gitea Package Registry"
+echo "  GITEA_REGISTRY=$(terraform output -raw gitea_registry 2>/dev/null || echo "http://${VPS_IP}:3000/${PROJECT_NAME}")"
 
 echo "  # Cognito"
 echo "  USER_POOL_ENDPOINT=$(terraform output -raw user_pool_endpoint 2>/dev/null || echo '<no disponible>')"
@@ -384,11 +393,10 @@ checklist_ok=0
 
 # localstack/health con servicios disponibles
 curl -sf "$FLOCI_ENDPOINT/_localstack/health" > /tmp/floci-health-check.json 2>/dev/null
-if jq -e '.services.ecr? // empty | . != ""' /tmp/floci-health-check.json &>/dev/null && \
-   jq -e '.services.secretsmanager? // empty | . != ""' /tmp/floci-health-check.json &>/dev/null && \
+if jq -e '.services.secretsmanager? // empty | . != ""' /tmp/floci-health-check.json &>/dev/null && \
    jq -e '.services."cognito-idp"? // empty | . != ""' /tmp/floci-health-check.json &>/dev/null && \
    jq -e '.services.iam? // empty | . != ""' /tmp/floci-health-check.json &>/dev/null; then
-  check_item "floci: ecr, secretsmanager, cognito-idp, iam disponibles" 0
+  check_item "floci: secretsmanager, cognito-idp, iam disponibles" 0
 else
   check_item "floci: ecr, secretsmanager, cognito-idp, iam disponibles" 1
   checklist_ok=1
@@ -396,24 +404,24 @@ fi
 rm -f /tmp/floci-health-check.json
 
 # psql conecta
-if [[ -n "$RDS_PORT" ]] && command -v psql &>/dev/null; then
-  if PGPASSWORD=changeme123 psql "postgresql://admin:changeme123@localhost:$RDS_PORT/$PG_DB_NAME" -c '\conninfo' &>/dev/null; then
-    check_item "psql conecta a $PG_DB_NAME en localhost:$RDS_PORT" 0
+if command -v psql &>/dev/null; then
+  if PGPASSWORD=changeme123 psql "postgresql://admin:changeme123@${VPS_IP}:5432/${PG_DB_NAME}" -c '\conninfo' &>/dev/null; then
+    check_item "psql conecta a $PG_DB_NAME en $VPS_IP:5432" 0
   else
-    check_item "psql conecta a $PG_DB_NAME en localhost:$RDS_PORT" 1
+    check_item "psql conecta a $PG_DB_NAME en $VPS_IP:5432" 1
     checklist_ok=1
   fi
 else
-  check_item "psql conecta a $PG_DB_NAME (psql no disponible o rds_port vacío)" 1
+  check_item "psql conecta a $PG_DB_NAME (psql no disponible)" 1
   checklist_ok=1
 fi
 
 # mongosh ping
 if command -v mongosh &>/dev/null; then
-  if mongosh "mongodb://localhost:27017" --eval 'db.runCommand({ ping: 1 })' --quiet 2>/dev/null | grep -q '"ok" : 1'; then
-    check_item "mongosh responde { ok: 1 } al ping" 0
+  if mongosh "mongodb://${VPS_IP}:27017" --eval 'db.runCommand({ ping: 1 })' --quiet 2>/dev/null | grep -q '"ok" : 1'; then
+    check_item "mongosh responde { ok: 1 } al ping en $VPS_IP:27017" 0
   else
-    check_item "mongosh responde { ok: 1 } al ping" 1
+    check_item "mongosh responde { ok: 1 } al ping en $VPS_IP:27017" 1
     checklist_ok=1
   fi
 else
@@ -422,18 +430,18 @@ else
 fi
 
 # kafka responde
-if docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list &>/dev/null; then
-  check_item "kafka-topics --list responde" 0
+if ssh_vps "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list" &>/dev/null; then
+  check_item "kafka-topics --list responde en $VPS_IP:9092" 0
 else
-  check_item "kafka-topics --list responde" 1
+  check_item "kafka-topics --list responde en $VPS_IP:9092" 1
   checklist_ok=1
 fi
 
 # Gitea healthz OK
-if curl -sf http://localhost:3000/api/healthz &>/dev/null; then
-  check_item "Gitea /api/healthz responde OK" 0
+if curl -sf "http://${VPS_IP}:3000/api/healthz" &>/dev/null; then
+  check_item "Gitea /api/healthz responde OK en $VPS_IP:3000" 0
 else
-  check_item "Gitea /api/healthz responde OK" 1
+  check_item "Gitea /api/healthz responde OK en $VPS_IP:3000" 1
   checklist_ok=1
 fi
 

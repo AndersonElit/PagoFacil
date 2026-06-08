@@ -343,7 +343,7 @@ Todo diseño de microservicios **debe** declarar explícitamente el patrón **Da
 
 - Cada microservicio posee y gestiona su propia base de datos; ningún otro servicio accede directamente a ella (ni para lectura ni para escritura).
 - Las bases de datos se provisionan automáticamente por `init-databases.sh` usando la convención: `<prefijo>_<servicio_slug>` (ej. `mydb_clientes_service`). El prefijo se define en `scaffold-all-services.sh` con `-p <prefijo-pg>` / `-m <prefijo-mongo>`.
-- El esquema inicial de cada servicio lo aplica **Liquibase standalone** (`run-liquibase-migrations.sh`) como paso previo al despliegue (`db/<servicio>/changelog/00001_initial_schema.yaml`), **no** un script global ni Flyway (Flyway requiere JDBC bloqueante — incompatible con los servicios R2DBC del framework).
+- El esquema inicial de cada servicio lo aplica **Liquibase standalone** (`run-liquibase-migrations.sh --gitea-clone`) como paso previo al despliegue; los changelogs residen en el repo Git dedicado **`<proyecto>-migrations`** en Gitea del VPS (`http://VPS_IP:3000/<proyecto>/<proyecto>-migrations`), **no** en el mismo repo de la aplicación ni embebidos en el JAR (Flyway requiere JDBC bloqueante — incompatible con los servicios R2DBC del framework).
 - La comunicación entre servicios que necesita datos de otra BD se resuelve mediante **eventos de dominio** (Kafka) o **llamadas REST** al servicio propietario — nunca acceso directo a la BD ajena.
 - En la tabla resumen de entidades, incluir una columna **"BD propietaria"** que indique la base de datos que le corresponde a cada servicio según la convención de nombres.
 
@@ -394,11 +394,11 @@ Si el diseño usa más de un motor (por ejemplo PostgreSQL para un contexto y Mo
 - Reflejar las relaciones y trust boundaries del dominio (referencias, foreign keys, embedding).
 - Elegir el formato (`.sql`, `.js` o ambos) según el tipo de base de datos decidido en el Stack Tecnológico de `system.md`.
 - Mantener nivel de diseño: esquema y estructura, sin datos de prueba ni lógica de aplicación.
-- **Separación por BD (Database-per-Service):** los comentarios `-- BC-XX:` en el `schema.sql` delimitan los bloques de tablas de cada microservicio. Cada bloque `-- BC-XX:` se extrae por `scaffold-all-services.sh` al changelog Liquibase `db/<servicio>/changelog/00001_initial_schema.yaml` del servicio correspondiente y se aplica sobre su BD propia (`<prefijo>_<svc_slug>`) mediante `run-liquibase-migrations.sh`. **No existe un schema global compartido en producción**; el `schema.sql` es únicamente el artefacto de diseño de referencia.
+- **Separación por BD (Database-per-Service):** los comentarios `-- BC-XX:` en el `schema.sql` delimitan los bloques de tablas de cada microservicio. Cada bloque `-- BC-XX:` se extrae por `scaffold-all-services.sh` al changelog Liquibase `00001_initial_schema.yaml` del servicio correspondiente, se publica en el repo **`<proyecto>-migrations`** en Gitea del VPS y se aplica sobre su BD propia (`<prefijo>_<svc_slug>`) mediante `run-liquibase-migrations.sh --gitea-clone`. **No existe un schema global compartido en producción**; el `schema.sql` es únicamente el artefacto de diseño de referencia.
 - **Tablas de soporte para Saga y Outbox (si aplica):** si el diseño incluye sagas, añade al `schema.sql` (bajo un comentario de bounded context propio) las tablas de soporte, agrupadas por su servicio propietario:
   - En el **servicio orquestador** (`integration-service`): `saga_instance` (`saga_id` PK, `saga_type`, `state`, `current_step`, `payload jsonb`, timestamps) y `saga_step_log` (`id`, `saga_id` FK, `step_name`, `status`, `compensation_payload jsonb`, `executed_at`).
   - En cada **servicio participante** que publica eventos: `outbox` (`id`, `aggregate_type`, `aggregate_id`, `event_type`, `payload jsonb`, `topic`, `created_at`, `published_at`, `status`; índice sobre `status, created_at`) y `processed_message` (`message_id` PK, `consumer`, `processed_at`) para idempotencia.
-  - Cada tabla es propiedad de exactamente un microservicio; sepáralas con comentarios `-- BC-XX:` para que `scaffold-all-services.sh` las asigne al changelog Liquibase correcto (`db/<servicio>/changelog/00001_initial_schema.yaml`).
+  - Cada tabla es propiedad de exactamente un microservicio; sepáralas con comentarios `-- BC-XX:` para que `scaffold-all-services.sh` las asigne al changelog Liquibase correcto (`00001_initial_schema.yaml` en el repo `<proyecto>-migrations` de Gitea).
   - Cada tabla vive en la BD del servicio propietario, nunca en una BD compartida.
 
 # REFERENCIA EN EL DOCUMENTO
@@ -520,16 +520,16 @@ Esta sección debe indicar que la infraestructura base del proyecto se aprovisio
 
 Este script genera el árbol Terraform multi-ambiente (`dev`/`staging`/`prod`) para:
 
-- **Frontend**: proyecto y despliegues en Vercel (provider `vercel`).
-- **Backend (AWS)**: EKS, RDS (PostgreSQL), IAM, Cognito, API Gateway, Secrets Manager y ECR. **Nota sobre dev**: en el ambiente `dev` el cluster Kubernetes NO es EKS sino **K3d** (K3s en Docker, real, sobre `floci-net`) con su propio registry de imágenes; el EKS de floci es solo emulación de metadatos y no soporta el flujo CI/CD+GitOps completo. EKS aplica a `staging`/`prod`.
+- **Frontend**: pod Kubernetes (Deployment + Service + Ingress Traefik) en K3s — imagen construida por Jenkins, publicada en **Gitea Package Registry** (OCI nativo), desplegada por ArgoCD. En staging/prod puede usarse EKS + ALB.
+- **Backend (AWS)**: EKS, IAM, Cognito, API Gateway, Secrets Manager. **Nota sobre dev**: en el ambiente `dev` el cluster Kubernetes es **K3s nativo en VPS Ubuntu 26.04 LTS** (sin Docker wrapper); el registry de imágenes es el **Gitea Package Registry** (`VPS_IP:3000/<org>`); **PostgreSQL 16 y MongoDB 7 corren como servicios systemd nativos** en el VPS (sin RDS/ECR de floci en dev); EKS y RDS aplican solo a `staging`/`prod`.
 
 # REGLAS PARA LA REFERENCIA AL SCRIPT
 
 - Referenciar el script por su ruta relativa: `.claude/scripts/base-infrastructure-builder.sh`.
 - Indicar que se ejecuta tras completar la etapa de Diseño Técnico, usando las decisiones de este documento (`infrastructure.md`) como insumos.
-- Documentar en la tabla de componentes la correspondencia entre las decisiones de infraestructura del diseño y los recursos que genera el script (Vercel, EKS/K3d-en-dev, RDS, Cognito, API Gateway, Secrets Manager, ECR).
+- Documentar en la tabla de componentes la correspondencia entre las decisiones de infraestructura del diseño y los recursos que genera/verifica el script (K3s nativo en VPS en dev / EKS en staging/prod, PostgreSQL nativo en VPS / RDS en staging/prod, Gitea Package Registry / ECR en staging/prod, Cognito, API Gateway, Secrets Manager). **No mencionar ECR ni RDS como recursos de dev** — son exclusivos de staging/prod.
 - Si una decisión técnica del diseño difiere de lo que provisiona el script por defecto, indicarlo explícitamente como ajuste requerido.
-- Si el diseño incluye orquestación de saga con coordinador LRA, la tabla de componentes debe incluir el **coordinador Narayana LRA** (contenedor en `floci-net` para dev) y, para las pruebas de integración de las rutas Camel, **WireMock** como simulador de los sistemas externos. Ambos los provisiona `base-infrastructure-builder.sh`.
+- Si el diseño incluye orquestación de saga con coordinador LRA, la tabla de componentes debe incluir el **coordinador Narayana LRA** (servicio systemd `lra-coordinator` en el VPS, puerto 50000) y, para las pruebas de integración de las rutas Camel, **WireMock** (servicio systemd `wiremock` en el VPS, puerto 9999). Ambos los aprovisiona `vps-setup.sh services`.
 
 ---
 
@@ -781,7 +781,7 @@ Si el diseño estratégico declara reportería, materialízala técnicamente en 
 - En **Diseño de Persistencia**:
   - Esquemas parquet (`raw`/`processed`) y layout S3.
   - **`<prefijo>_readmodel`** (PostgreSQL, Database-per-Service del Projection Service): tablas desnormalizadas optimizadas para extracción; ej. `report_sales (customer_id, customer_name, order_id, order_total, payment_amount, payment_date)`. MS1 la lee con `SELECT * FROM report_sales` vía JDBC — sin JOINs entre BDs operacionales.
-  - **`<prefijo>_reporting`** (PostgreSQL): tabla `report_schema_catalog` (`report_type` PK, `schema_version`, `columns` jsonb, `integrity_rules` jsonb, `updated_at`); MS1 la consulta para validar el esquema del DataFrame extraído.
+  - **`<prefijo>_reporting`** (PostgreSQL): tabla `report_schema_catalog` (`report_type` PK, `schema_version`, `columns` jsonb, `integrity_rules` jsonb, `updated_at`); su schema se aplica vía Liquibase (repo `<proyecto>-migrations` en Gitea), no con SQL inline; MS1 la consulta para validar el esquema del DataFrame extraído.
   - Incluir en la tabla de BDs la columna "BD propietaria" indicando que `<prefix>_readmodel` es propiedad del `projection-service` y que es **read-only para el resto**.
 - Documenta los topics/eventos `report.extracted` y `report.processed` (contratos JSON) y los de fallo.
 
