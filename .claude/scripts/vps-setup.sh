@@ -176,6 +176,18 @@ if ! command -v liquibase &>/dev/null; then
 fi
 liquibase --version 2>&1 | head -1
 
+echo "[+] GraalVM JDK 25 (native-image para floci)..."
+GRAALVM_DIR="/opt/graalvm-25"
+if [[ ! -x "${GRAALVM_DIR}/bin/native-image" ]]; then
+  wget -qO /tmp/graalvm.tar.gz \
+    "https://download.oracle.com/graalvm/25/latest/graalvm-jdk-25_linux-x64_bin.tar.gz"
+  sudo mkdir -p "${GRAALVM_DIR}"
+  sudo tar -xzf /tmp/graalvm.tar.gz -C "${GRAALVM_DIR}" --strip-components=1
+  rm /tmp/graalvm.tar.gz
+fi
+${GRAALVM_DIR}/bin/java -version 2>&1 | head -1
+${GRAALVM_DIR}/bin/native-image --version 2>&1 | head -1
+
 echo "[OK] Prerequisitos instalados."
 REMOTE
   ok "Prerequisitos completados en $VM_IP"
@@ -481,8 +493,8 @@ sudo systemctl enable --now wiremock
 sleep 2
 systemctl is-active wiremock && echo "[OK] WireMock activo." || echo "[WARN] WireMock no activo."
 
-# ── 8. Narayana LRA Coordinator (JAR compilado desde código fuente) ───────────
-echo "[LRA] Compilando Narayana LRA Coordinator desde código fuente..."
+# ── 8. Narayana LRA Coordinator (Quarkus standalone, compilado desde fuente) ──
+echo "[LRA] Compilando Narayana LRA Coordinator (Quarkus standalone)..."
 NARAYANA_VERSION="7.0.0.Final"
 LRA_DIR="/opt/lra-coordinator"
 LRA_USER="lra"
@@ -502,10 +514,26 @@ if [[ ! -f "\$LRA_DIR/lra-coordinator.jar" ]]; then
   [[ -n "\$LRA_MODULE" ]] || { echo "[ERROR] Módulo lra/coordinator no encontrado en el repo"; exit 1; }
   echo "[LRA] Módulo encontrado: \${LRA_MODULE}"
 
-  echo "[LRA] Compilando (puede tardar 5-10 min)..."
+  echo "[LRA] Instalando POMs padre y compilando coordinator (5-10 min)..."
+  # mvn -pl falla porque el módulo no está en el reactor por defecto;
+  # se instalan root + padres intermedios con -N (non-recursive) para que
+  # maven pueda resolver el módulo coordinator de forma standalone.
+  LRA_GRANDPARENT=\$(dirname \$(dirname "\$LRA_MODULE"))
+  LRA_PARENT=\$(dirname "\$LRA_MODULE")
+
   cd /tmp/narayana-src
-  JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 mvn clean package \
-    -pl "\$LRA_MODULE" -am -DskipTests -Dquarkus.package.type=uber-jar -q
+  JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 mvn install -N -q -DskipTests
+
+  [[ "\$LRA_GRANDPARENT" != "." ]] && \
+    (cd /tmp/narayana-src/"\$LRA_GRANDPARENT" && \
+      JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 mvn install -N -q -DskipTests)
+
+  (cd /tmp/narayana-src/"\$LRA_PARENT" && \
+    JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 mvn install -N -q -DskipTests)
+
+  (cd /tmp/narayana-src/"\$LRA_MODULE" && \
+    JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 mvn package \
+      -DskipTests -Dquarkus.package.type=uber-jar -q)
 
   LRA_JAR=\$(find /tmp/narayana-src/\${LRA_MODULE}/target \
     -maxdepth 1 -name "*-runner.jar" 2>/dev/null | head -1)
@@ -572,9 +600,20 @@ cmd_floci() {
   ssh_vps "bash -s" <<'REMOTE'
 set -euo pipefail
 
-echo "[floci] Instalando floci CLI..."
+echo "[floci] Compilando binario nativo desde fuente..."
 if ! command -v floci &>/dev/null; then
-  curl -fsSL https://floci.io/install.sh | sh
+  sudo rm -rf /tmp/floci-src
+  git clone --depth=1 https://github.com/floci-io/floci-cli /tmp/floci-src
+
+  echo "[floci] Compilando con GraalVM native-image (5-10 min)..."
+  cd /tmp/floci-src
+  JAVA_HOME=/opt/graalvm-25 \
+    mvn clean package -Dnative -DskipTests -q
+
+  sudo cp target/floci /usr/local/bin/floci
+  sudo chmod +x /usr/local/bin/floci
+  cd /
+  sudo rm -rf /tmp/floci-src
 fi
 floci --version 2>/dev/null || true
 
