@@ -2,7 +2,7 @@
 
 ## 1. Objetivo
 
-Provisionar y validar el ambiente de desarrollo completo sobre un VPS Ubuntu 26.04 LTS. Al finalizar esta etapa, el VPS tendrá K3s operativo, todos los servicios de infraestructura corriendo como unidades systemd (PostgreSQL 16, MongoDB 7, Kafka KRaft, floci, SonarQube, Jenkins, LRA Coordinator, WireMock, Gitea) y los namespaces K3s creados para los workloads de PagoFacil. Esta etapa es prerequisito bloqueante para todas las demás.
+Provisionar y validar el ambiente de desarrollo completo sobre un VPS Ubuntu 26.04 LTS. Al finalizar esta etapa, el VPS tendrá K3s operativo, todos los servicios de infraestructura corriendo como unidades systemd (PostgreSQL 16, MongoDB 7/8, Kafka KRaft, floci, SonarQube, Jenkins, LRA Coordinator, WireMock, Gitea) y los namespaces K3s creados para los workloads de PagoFacil. Esta etapa es prerequisito bloqueante para todas las demás.
 
 ---
 
@@ -21,7 +21,7 @@ El script `vps-setup.sh all` instala en el VPS:
 - K3s (nativo, single-node)
 - Docker Engine (para builds locales en el VPS)
 - PostgreSQL 16 (systemd)
-- MongoDB 7 (systemd)
+- MongoDB 7/8 (systemd — versión elegida automáticamente según soporte AVX del CPU)
 - Apache Kafka 3 KRaft (systemd, puertos 9092 interno + 29092 externo)
 - floci (systemd, puerto 4566)
 - SonarQube Community (systemd, puerto 9000)
@@ -85,10 +85,30 @@ Este comando es idempotente. Realiza la instalación completa de todos los servi
 ### 3.3 Verificar conectividad SSH
 
 ```bash
+# Todos los servicios son unidades systemd — deben responder "active"
 ssh ubuntu@<VPS_IP> "systemctl is-active postgresql mongodb kafka sonarqube jenkins gitea lra-coordinator wiremock floci"
 ```
 
-Todos los servicios deben responder `active`.
+Todos deben responder `active`.
+
+> **Nota floci**: floci es un binario nativo (compilado con GraalVM) que gestiona un contenedor Docker interno. Se integra a systemd con `Type=oneshot RemainAfterExit=yes`, por lo que `systemctl is-active floci` devuelve `active` después de que `floci start` completa. Para reiniciarlo manualmente: `sudo systemctl restart floci`. Para ver el container subyacente: `docker ps --filter name=floci`.
+
+#### Troubleshooting rápido
+
+**SonarQube inactive** — Requiere `vm.max_map_count ≥ 524288` para su Elasticsearch embebido:
+```bash
+ssh ubuntu@<VPS_IP> "sudo sysctl -w vm.max_map_count=524288 && sudo systemctl restart sonarqube"
+# Esperar ~90 s y verificar
+ssh ubuntu@<VPS_IP> "systemctl is-active sonarqube"
+```
+
+**MongoDB inactive** — El script instala MongoDB 7 (sin AVX) o 8 (con AVX) automáticamente. Si falla:
+```bash
+ssh ubuntu@<VPS_IP> "grep -c avx /proc/cpuinfo"   # 0 = sin AVX
+ssh ubuntu@<VPS_IP> "journalctl -u mongod -n 20 --no-pager"
+```
+
+> **Nota AVX en KVM**: Si se necesita MongoDB 8 específicamente y el CPU virtual no tiene AVX, editar la VM con `virsh edit sdlc-vps` y agregar `<cpu mode='host-passthrough'/>`. Luego `virsh shutdown sdlc-vps && virsh start sdlc-vps` y reejecutar `services`.
 
 ---
 
@@ -281,6 +301,7 @@ Los siguientes criterios deben verificarse manualmente o mediante el script `ini
 - [ ] PostgreSQL 16 responde en `<VPS_IP>:5432` y acepta conexiones con `pagofacil_app`.
 - [ ] MongoDB 7 responde en `<VPS_IP>:27017` y acepta conexiones con `pagofacil_app`.
 - [ ] Kafka KRaft responde en `<VPS_IP>:29092` — `kafka-topics.sh --list` devuelve los topics esperados.
+- [ ] floci activo como servicio systemd: `systemctl is-active floci` devuelve `active`.
 - [ ] floci responde en `http://<VPS_IP>:4566` — `aws --endpoint-url http://<VPS_IP>:4566 s3 ls` lista los buckets `pagofacil-reports` y `pagofacil-exports`.
 - [ ] LRA Coordinator responde en `http://<VPS_IP>:50000/lra-coordinator` con HTTP 200.
 - [ ] WireMock responde en `http://<VPS_IP>:9999/__admin/` con HTTP 200.

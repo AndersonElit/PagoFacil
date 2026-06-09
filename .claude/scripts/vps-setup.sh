@@ -219,21 +219,35 @@ if ! command -v docker &>/dev/null; then
 fi
 docker --version
 
-# ── 2. MongoDB 8 ─────────────────────────────────────────────────────────────
-echo "[MongoDB] Instalando MongoDB 8..."
+# ── 2. MongoDB (8 con AVX, 7 sin AVX) ────────────────────────────────────────
+echo "[MongoDB] Instalando MongoDB..."
 if ! command -v mongod &>/dev/null; then
   sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list \
              /usr/share/keyrings/mongodb-server-*.gpg
-  curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc \
-    | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
-  echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] \
-    https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" \
-    | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+
+  # MongoDB 5+ requiere AVX; KVM con cpu model por defecto no lo expone
+  if grep -qc avx /proc/cpuinfo; then
+    MONGO_VER="8.0"
+    echo "[MongoDB] AVX disponible — instalando MongoDB 8.0"
+  else
+    MONGO_VER="7.0"
+    echo "[MongoDB] Sin AVX (VM KVM) — instalando MongoDB 7.0"
+  fi
+
+  curl -fsSL "https://www.mongodb.org/static/pgp/server-\${MONGO_VER}.asc" \
+    | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-\${MONGO_VER}.gpg
+  MONGO_CS=\$(lsb_release -cs)
+  curl -sf "https://repo.mongodb.org/apt/ubuntu/dists/\${MONGO_CS}/mongodb-org/\${MONGO_VER}/InRelease" &>/dev/null \
+    || MONGO_CS="noble"
+  echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-\${MONGO_VER}.gpg ] \
+    https://repo.mongodb.org/apt/ubuntu \${MONGO_CS}/mongodb-org/\${MONGO_VER} multiverse" \
+    | sudo tee /etc/apt/sources.list.d/mongodb-org-\${MONGO_VER}.list
   sudo apt-get update -qq
   sudo apt-get install -y -qq mongodb-org
 fi
 sudo systemctl enable --now mongod
-systemctl is-active mongod && echo "[OK] MongoDB activo." || echo "[WARN] MongoDB no activo."
+sleep 3
+systemctl is-active mongod && echo "[OK] MongoDB activo." || echo "[WARN] MongoDB no activo (revisar: journalctl -u mongod -n 20)."
 
 # ── 3. Apache Kafka 3.9 (KRaft, sin ZooKeeper) ──────────────────────────────
 echo "[Kafka] Instalando Apache Kafka 3.9..."
@@ -399,7 +413,11 @@ SONAR_USER="sonarqube"
 
 id "\$SONAR_USER" &>/dev/null || sudo useradd -r -s /bin/false "\$SONAR_USER"
 
-# Java 17 requerido: SonarQube 10.x usa SecurityManager eliminado en Java 21
+# Elasticsearch embebido requiere vm.max_map_count >= 524288
+sudo sysctl -w vm.max_map_count=524288 > /dev/null
+grep -q 'vm.max_map_count' /etc/sysctl.conf \
+  || echo 'vm.max_map_count=524288' | sudo tee -a /etc/sysctl.conf > /dev/null
+
 sudo apt-get install -y -qq openjdk-17-jdk
 
 if [[ ! -d "\$SONAR_DIR" ]]; then
@@ -423,7 +441,7 @@ After=network.target
 [Service]
 Type=forking
 User=\$SONAR_USER
-Environment=SONAR_JAVA_PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin/java
+Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ExecStart=\$SONAR_DIR/bin/linux-x86-64/sonar.sh start
 ExecStop=\$SONAR_DIR/bin/linux-x86-64/sonar.sh stop
 PIDFile=\$SONAR_DIR/bin/linux-x86-64/SonarQube.pid
@@ -438,8 +456,11 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now sonarqube
-sleep 10
-systemctl is-active sonarqube && echo "[OK] SonarQube activo." || echo "[WARN] SonarQube no activo (puede tardar 1-2 min en arrancar)."
+# SonarQube tarda 60-120 s en arrancar (Elasticsearch embebido)
+for _i in \$(seq 1 12); do
+  systemctl is-active --quiet sonarqube && break || sleep 10
+done
+systemctl is-active sonarqube && echo "[OK] SonarQube activo." || echo "[WARN] SonarQube no activo (revisar: journalctl -u sonarqube -n 30)."
 
 # ── 6. Jenkins LTS ───────────────────────────────────────────────────────────
 echo "[Jenkins] Instalando Jenkins LTS..."
@@ -567,13 +588,28 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now lra-coordinator
-sleep 3
-systemctl is-active lra-coordinator && echo "[OK] LRA Coordinator activo." || echo "[WARN] LRA Coordinator no activo."
+# JVM tarda ~15-20 s en arrancar; reintentar hasta 30 s
+for _i in \$(seq 1 6); do
+  systemctl is-active --quiet lra-coordinator && break || sleep 5
+done
+systemctl is-active lra-coordinator \
+  && echo "[OK] LRA Coordinator activo." \
+  || echo "[WARN] LRA Coordinator no activo (revisar: journalctl -u lra-coordinator -n 20)."
 
 # ── 9. PostgreSQL 16 ──────────────────────────────────────────────────────────
 echo "[PostgreSQL] Instalando PostgreSQL 16..."
 if ! command -v psql &>/dev/null; then
-  sudo apt-get install -y -qq postgresql-16 postgresql-contrib-16
+  # Ubuntu 26.04 no trae postgresql-16 en apt; usar repositorio oficial PGDG
+  curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+  PGDG_CS=\$(lsb_release -cs)
+  # Si el codename no existe aún en PGDG (distro muy nueva) caer a noble
+  curl -sf "https://apt.postgresql.org/pub/repos/apt/dists/\${PGDG_CS}-pgdg/InRelease" &>/dev/null \
+    || PGDG_CS="noble"
+  echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt \${PGDG_CS}-pgdg main" \
+    | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq postgresql-16
 fi
 # Escuchar en todas las interfaces para que los pods K3s accedan vía VPS_IP
 sudo sed -i "s|^#listen_addresses.*|listen_addresses = '*'|" \
@@ -593,6 +629,9 @@ REMOTE
 }
 
 # ─── COMANDO: floci ───────────────────────────────────────────────────────────
+# floci = CLI nativo (GraalVM) que gestiona un container Docker interno.
+# Systemd usa Type=oneshot + RemainAfterExit para que `systemctl is-active floci`
+# devuelva "active" después de que `floci start` termina (el container sigue vivo).
 cmd_floci() {
   require_vm_ip
   header "Instalando y levantando floci en $VM_IP"
@@ -617,17 +656,36 @@ if ! command -v floci &>/dev/null; then
 fi
 floci --version 2>/dev/null || true
 
-echo "[floci] Iniciando floci nativo (usa Docker solo para sus contenedores internos)..."
-floci start
+echo "[floci] Creando unidad systemd..."
+sudo tee /etc/systemd/system/floci.service > /dev/null <<EOF
+[Unit]
+Description=Floci cloud emulator (LocalStack-compatible)
+After=docker.service
+Requires=docker.service
 
-# Esperar a que responda
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/floci start
+ExecStop=/usr/local/bin/floci stop
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable floci
+
+# Si ya hay un container corriendo, detenerlo antes de (re)iniciar
+floci stop 2>/dev/null || true
+sudo systemctl start floci
+
+# Esperar health endpoint (hasta 60 s)
 for i in $(seq 1 30); do
-  if curl -sf http://localhost:4566/_localstack/health &>/dev/null; then
-    echo "[OK] floci respondiendo en http://localhost:4566."
-    break
-  fi
-  sleep 2
+  curl -sf http://localhost:4566/_localstack/health &>/dev/null && break || sleep 2
 done
+systemctl is-active floci && echo "[OK] floci activo (systemctl is-active devuelve active)." \
+  || echo "[WARN] floci no activo (revisar: journalctl -u floci -n 20)."
 REMOTE
 
   ok "floci levantado en $VM_IP:4566"
@@ -705,8 +763,9 @@ cmd_status() {
   ssh_vps "bash -s" <<'REMOTE'
 echo ""
 echo "── Servicios systemd ──────────────────────────────────────"
-for svc in mongod kafka gitea sonarqube jenkins wiremock lra-coordinator k3s; do
-  state=$(systemctl is-active "$svc" 2>/dev/null || echo "no instalado")
+for svc in mongod kafka gitea sonarqube jenkins wiremock lra-coordinator postgresql k3s; do
+  state=$(systemctl is-active "$svc" 2>/dev/null)
+  [[ "$state" == "unknown" || -z "$state" ]] && state="no instalado"
   printf "  %-22s %s\n" "$svc" "$state"
 done
 
@@ -716,7 +775,7 @@ docker ps --format "  {{.Names}}\t{{.Status}}" 2>/dev/null || echo "  Docker no 
 
 echo ""
 echo "── Puertos en escucha ─────────────────────────────────────"
-ss -tlnp 2>/dev/null | grep -E ':(22|80|443|2222|3000|4566|6443|8080|9000|9090|9092|9999|16686|27017|29092|50000)\s' \
+ss -tlnp 2>/dev/null | grep -E ':(22|80|443|2222|3000|4566|5432|6443|8080|9000|9090|9092|9999|16686|27017|29092|50000)\s' \
   | awk '{print "  " $4}' | sort -t: -k2 -n || true
 
 echo ""
