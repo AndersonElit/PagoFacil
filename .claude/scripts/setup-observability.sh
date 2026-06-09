@@ -92,7 +92,7 @@ helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheu
   --set grafana.fullnameOverride="${PROJECT_NAME}-grafana" \
   --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
   --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-  --wait --timeout=5m
+  --wait --timeout=12m
 log_ok "kube-prometheus-stack instalado."
 
 # ---------------------------------------------------------------------------
