@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pagofacil-frontend
+description: Frontend Next.js (K3s + Traefik Ingress)
+type: application
+version: 0.1.0
+appVersion: "latest"

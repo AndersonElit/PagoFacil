@@ -1,0 +1,6 @@
+image:
+  repository: 192.168.122.4:3000/pagofacil/frontend
+  tag: latest
+
+env:
+  NEXT_PUBLIC_API_URL: "http://192.168.122.4:8080"

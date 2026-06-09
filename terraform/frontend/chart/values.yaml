@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: 192.168.122.4:3000/pagofacil/frontend
+  tag: latest
+  pullPolicy: Always
+
+imagePullSecrets:
+  - name: gitea-registry-secret
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: true
+  className: traefik
+  host: ""           # vacío = usar IP del nodo
+  path: /
+  pathType: Prefix
+
+env:
+  NEXT_PUBLIC_API_URL: "http://192.168.122.4:8080"
