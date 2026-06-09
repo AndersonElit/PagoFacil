@@ -12,7 +12,7 @@
 #   services    Instala servicios como systemd: MongoDB 8, Kafka 3.7, Gitea 1.22,
 #               SonarQube LTS, Jenkins LTS, WireMock 3.9, Narayana LRA Coordinator
 #   k3s         Instala K3s nativo + ArgoCD + descarga kubeconfig al host
-#   floci       Instala floci CLI + levanta contenedor floci/floci:latest (Docker)
+#   floci       Instala floci CLI nativo (usa Docker solo para sus contenedores internos)
 #   status      Muestra estado de todos los servicios
 #   all         Ejecuta prereqs → services → floci → k3s en orden
 #
@@ -481,24 +481,55 @@ sudo systemctl enable --now wiremock
 sleep 2
 systemctl is-active wiremock && echo "[OK] WireMock activo." || echo "[WARN] WireMock no activo."
 
-# ── 8. Narayana LRA Coordinator (Docker) ──────────────────────────────────────
-echo "[LRA] Instalando Narayana LRA Coordinator..."
-docker pull quay.io/jbosstm/lra-coordinator:latest
+# ── 8. Narayana LRA Coordinator (JAR compilado desde código fuente) ───────────
+echo "[LRA] Compilando Narayana LRA Coordinator desde código fuente..."
+NARAYANA_VERSION="7.0.0.Final"
+LRA_DIR="/opt/lra-coordinator"
+LRA_USER="lra"
+
+id "\$LRA_USER" &>/dev/null || sudo useradd -r -s /bin/false "\$LRA_USER"
+sudo mkdir -p "\$LRA_DIR"
+
+if [[ ! -f "\$LRA_DIR/lra-coordinator.jar" ]]; then
+  echo "[LRA] Clonando narayana \${NARAYANA_VERSION} (rama shallow)..."
+  sudo rm -rf /tmp/narayana-src
+  git clone --depth=1 --branch "\${NARAYANA_VERSION}" \
+    https://github.com/jbosstm/narayana.git /tmp/narayana-src
+
+  echo "[LRA] Localizando módulo lra/coordinator..."
+  LRA_MODULE=\$(find /tmp/narayana-src -path "*/lra/coordinator/pom.xml" \
+    ! -path "*/test*" 2>/dev/null | head -1 | sed "s|/tmp/narayana-src/||;s|/pom.xml||")
+  [[ -n "\$LRA_MODULE" ]] || { echo "[ERROR] Módulo lra/coordinator no encontrado en el repo"; exit 1; }
+  echo "[LRA] Módulo encontrado: \${LRA_MODULE}"
+
+  echo "[LRA] Compilando (puede tardar 5-10 min)..."
+  cd /tmp/narayana-src
+  JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 mvn clean package \
+    -pl "\$LRA_MODULE" -am -DskipTests -Dquarkus.package.type=uber-jar -q
+
+  LRA_JAR=\$(find /tmp/narayana-src/\${LRA_MODULE}/target \
+    -maxdepth 1 -name "*-runner.jar" 2>/dev/null | head -1)
+  [[ -n "\$LRA_JAR" ]] || LRA_JAR=\$(find /tmp/narayana-src/\${LRA_MODULE}/target \
+    -maxdepth 1 -name "*.jar" ! -name "*sources*" ! -name "*javadoc*" 2>/dev/null | tail -1)
+  [[ -n "\$LRA_JAR" ]] || { echo "[ERROR] JAR del LRA Coordinator no encontrado en target/"; exit 1; }
+
+  sudo cp "\$LRA_JAR" "\$LRA_DIR/lra-coordinator.jar"
+  sudo rm -rf /tmp/narayana-src
+  echo "[LRA] JAR instalado en \$LRA_DIR/lra-coordinator.jar"
+fi
+
+sudo chown -R "\$LRA_USER:\$LRA_USER" "\$LRA_DIR"
 
 sudo tee /etc/systemd/system/lra-coordinator.service > /dev/null <<EOF
 [Unit]
 Description=Narayana LRA Coordinator
-After=docker.service
-Requires=docker.service
+After=network.target
 
 [Service]
 Type=simple
-ExecStartPre=-/usr/bin/docker rm -f lra-coordinator
-ExecStart=/usr/bin/docker run --rm --name lra-coordinator \
-  -p 50000:50000 \
-  -e QUARKUS_HTTP_PORT=50000 \
-  quay.io/jbosstm/lra-coordinator:latest
-ExecStop=/usr/bin/docker stop lra-coordinator
+User=\$LRA_USER
+Environment=QUARKUS_HTTP_PORT=50000
+ExecStart=/usr/bin/java -jar \$LRA_DIR/lra-coordinator.jar
 Restart=on-failure
 RestartSec=5
 
@@ -547,17 +578,8 @@ if ! command -v floci &>/dev/null; then
 fi
 floci --version 2>/dev/null || true
 
-echo "[floci] Iniciando contenedor floci/floci:latest..."
-floci start 2>/dev/null || docker run -d \
-  --name floci \
-  --restart unless-stopped \
-  -p 4566:4566 \
-  -p 5000-5099:5000-5099 \
-  -p 5101-6499:5101-6499 \
-  -p 6501-8000:6501-8000 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e DOCKER_NETWORK=bridge \
-  floci/floci:latest
+echo "[floci] Iniciando floci nativo (usa Docker solo para sus contenedores internos)..."
+floci start
 
 # Esperar a que responda
 for i in $(seq 1 30); do

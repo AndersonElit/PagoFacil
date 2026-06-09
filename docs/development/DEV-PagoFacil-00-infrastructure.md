@@ -55,9 +55,22 @@ virsh start sdlc-vps
 # hostname, UTC, NTP, UFW, cloud-init NoCloud, sysctl vm.max_map_count)
 .claude/scripts/qemu-vps.sh setup --vm-ip <VPS_IP>
 
+# listar vm
+virsh list --all
+
+# Eliminar vm
+bash .claude/scripts/qemu-vps.sh delete --vm-ip <VPS_IP> --force
+
 ### 3.2 Instalar todos los servicios del stack
 
-# Inhabilitar autenticacion con contraseña
+# copiar llave publica
+ssh-copy-id -i ~/.ssh/id_ed25519.pub ubuntu@<VPS_IP>
+
+Te pide la contraseña una última vez, y después podés conectar con:
+
+ssh ubuntu@<VPS_IP>
+
+# Inhabilitar autenticacion con contraseña (esto se hace dentro de la vm)
 echo "ubuntu ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/ubuntu-nopasswd
 sudo chmod 440 /etc/sudoers.d/ubuntu-nopasswd
 
