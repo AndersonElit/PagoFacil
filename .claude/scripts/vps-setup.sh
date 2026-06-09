@@ -219,35 +219,104 @@ if ! command -v docker &>/dev/null; then
 fi
 docker --version
 
-# ── 2. MongoDB (8 con AVX, 7 sin AVX) ────────────────────────────────────────
-echo "[MongoDB] Instalando MongoDB..."
-if ! command -v mongod &>/dev/null; then
-  sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list \
-             /usr/share/keyrings/mongodb-server-*.gpg
+# ── 2. MongoDB / FerretDB (kernel-aware) ─────────────────────────────────────
+# MongoDB 8+ es incompatible con kernel >= 6.19 (SERVER-121912).
+# En kernels afectados se instala FerretDB como proxy MongoDB-compatible.
+echo "[MongoDB] Detectando versión de kernel..."
+KERNEL_MAJOR=\$(uname -r | cut -d. -f1)
+KERNEL_MINOR=\$(uname -r | cut -d. -f2)
 
-  # MongoDB 5+ requiere AVX; KVM con cpu model por defecto no lo expone
-  if grep -qc avx /proc/cpuinfo; then
-    MONGO_VER="8.0"
-    echo "[MongoDB] AVX disponible — instalando MongoDB 8.0"
-  else
-    MONGO_VER="7.0"
-    echo "[MongoDB] Sin AVX (VM KVM) — instalando MongoDB 7.0"
+if [[ \$KERNEL_MAJOR -gt 6 ]] || { [[ \$KERNEL_MAJOR -eq 6 ]] && [[ \$KERNEL_MINOR -ge 19 ]]; }; then
+  echo "[MongoDB] Kernel \$(uname -r) >= 6.19 — MongoDB incompatible (SERVER-121912)."
+  echo "[MongoDB] Instalando FerretDB (proxy MongoDB-compatible sobre PostgreSQL)..."
+
+  # Instalar PostgreSQL anticipadamente si no está presente (FerretDB lo requiere)
+  if ! command -v psql &>/dev/null; then
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+    PGDG_CS=\$(lsb_release -cs)
+    curl -sf "https://apt.postgresql.org/pub/repos/apt/dists/\${PGDG_CS}-pgdg/InRelease" &>/dev/null \
+      || PGDG_CS="noble"
+    echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt \${PGDG_CS}-pgdg main" \
+      | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq postgresql-16
+    sudo systemctl enable --now postgresql
+    sleep 2
   fi
 
-  curl -fsSL "https://www.mongodb.org/static/pgp/server-\${MONGO_VER}.asc" \
-    | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-\${MONGO_VER}.gpg
-  MONGO_CS=\$(lsb_release -cs)
-  curl -sf "https://repo.mongodb.org/apt/ubuntu/dists/\${MONGO_CS}/mongodb-org/\${MONGO_VER}/InRelease" &>/dev/null \
-    || MONGO_CS="noble"
-  echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-\${MONGO_VER}.gpg ] \
-    https://repo.mongodb.org/apt/ubuntu \${MONGO_CS}/mongodb-org/\${MONGO_VER} multiverse" \
-    | sudo tee /etc/apt/sources.list.d/mongodb-org-\${MONGO_VER}.list
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq mongodb-org
+  # Crear rol y base de datos para FerretDB (idempotente)
+  sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='ferretdb'" \
+    | grep -q 1 || sudo -u postgres psql -c "CREATE USER ferretdb WITH PASSWORD 'ferretdb';"
+  sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='ferretdb'" \
+    | grep -q 1 || sudo -u postgres psql -c "CREATE DATABASE ferretdb OWNER ferretdb;"
+
+  FERRETDB_VERSION="1.24.0"
+  if ! command -v ferretdb &>/dev/null; then
+    # Intentar descarga directa del binario; si falla, probar el tarball
+    sudo wget -qO /usr/local/bin/ferretdb \
+      "https://github.com/FerretDB/FerretDB/releases/download/v\${FERRETDB_VERSION}/ferretdb-linux-amd64" \
+    || {
+      sudo wget -qO /tmp/ferretdb.tar.gz \
+        "https://github.com/FerretDB/FerretDB/releases/download/v\${FERRETDB_VERSION}/ferretdb_\${FERRETDB_VERSION}_linux_amd64.tar.gz"
+      sudo tar -xzf /tmp/ferretdb.tar.gz -C /usr/local/bin/ ferretdb 2>/dev/null \
+        || sudo tar -xzf /tmp/ferretdb.tar.gz --wildcards -C /usr/local/bin/ '*/ferretdb' --strip-components=1
+      rm -f /tmp/ferretdb.tar.gz
+    }
+    sudo chmod +x /usr/local/bin/ferretdb
+  fi
+  ferretdb --version 2>/dev/null | head -1 || true
+
+  id "ferretdb" &>/dev/null || sudo useradd -r -s /bin/false "ferretdb"
+
+  sudo tee /etc/systemd/system/mongod.service > /dev/null <<EOF
+[Unit]
+Description=FerretDB (MongoDB-compatible, backend PostgreSQL)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ferretdb
+ExecStart=/usr/local/bin/ferretdb --listen-addr=:27017 --postgresql-url=postgres://ferretdb:ferretdb@localhost/ferretdb?sslmode=disable
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+else
+  # MongoDB nativo (kernel < 6.19)
+  echo "[MongoDB] Instalando MongoDB nativo..."
+  if ! command -v mongod &>/dev/null; then
+    sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list \
+               /usr/share/keyrings/mongodb-server-*.gpg
+
+    if grep -qc avx /proc/cpuinfo; then
+      MONGO_VER="8.0"
+      echo "[MongoDB] AVX disponible — instalando MongoDB 8.0"
+    else
+      MONGO_VER="7.0"
+      echo "[MongoDB] Sin AVX (VM KVM) — instalando MongoDB 7.0"
+    fi
+
+    curl -fsSL "https://www.mongodb.org/static/pgp/server-\${MONGO_VER}.asc" \
+      | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-\${MONGO_VER}.gpg
+    MONGO_CS=\$(lsb_release -cs)
+    curl -sf "https://repo.mongodb.org/apt/ubuntu/dists/\${MONGO_CS}/mongodb-org/\${MONGO_VER}/InRelease" &>/dev/null \
+      || MONGO_CS="noble"
+    echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-\${MONGO_VER}.gpg ] \
+      https://repo.mongodb.org/apt/ubuntu \${MONGO_CS}/mongodb-org/\${MONGO_VER} multiverse" \
+      | sudo tee /etc/apt/sources.list.d/mongodb-org-\${MONGO_VER}.list
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq mongodb-org
+  fi
 fi
+
+sudo systemctl daemon-reload
 sudo systemctl enable --now mongod
 sleep 3
-systemctl is-active mongod && echo "[OK] MongoDB activo." || echo "[WARN] MongoDB no activo (revisar: journalctl -u mongod -n 20)."
+systemctl is-active mongod && echo "[OK] MongoDB/FerretDB activo." || echo "[WARN] mongod no activo (revisar: journalctl -u mongod -n 20)."
 
 # ── 3. Apache Kafka 3.9 (KRaft, sin ZooKeeper) ──────────────────────────────
 echo "[Kafka] Instalando Apache Kafka 3.9..."
