@@ -9,7 +9,7 @@
 # Comandos:
 #   prereqs     Instala herramientas de sistema (Java 21, Docker, AWS CLI, kubectl, helm,
 #               terraform, argocd CLI, Maven, curl, jq, yq, git, python3)
-#   services    Instala servicios como systemd: MongoDB 7, Kafka 3.7, Gitea 1.22,
+#   services    Instala servicios como systemd: MongoDB 8, Kafka 3.7, Gitea 1.22,
 #               SonarQube LTS, Jenkins LTS, WireMock 3.9, Narayana LRA Coordinator
 #   k3s         Instala K3s nativo + ArgoCD + descarga kubeconfig al host
 #   floci       Instala floci CLI + levanta contenedor floci/floci:latest (Docker)
@@ -109,7 +109,7 @@ sudo apt-get install -y -qq openjdk-21-jdk
 java -version 2>&1 | head -1
 
 echo "[4/10] Maven 3.9+..."
-MAVEN_VERSION="3.9.9"
+MAVEN_VERSION="3.9.16"
 if ! mvn --version &>/dev/null 2>&1; then
   wget -qO /tmp/maven.tar.gz \
     "https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
@@ -207,23 +207,25 @@ if ! command -v docker &>/dev/null; then
 fi
 docker --version
 
-# ── 2. MongoDB 7 ─────────────────────────────────────────────────────────────
-echo "[MongoDB] Instalando MongoDB 7..."
+# ── 2. MongoDB 8 ─────────────────────────────────────────────────────────────
+echo "[MongoDB] Instalando MongoDB 8..."
 if ! command -v mongod &>/dev/null; then
-  curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
-    | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-  echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] \
-    https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/7.0 multiverse" \
-    | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+  sudo rm -f /etc/apt/sources.list.d/mongodb-org-*.list \
+             /usr/share/keyrings/mongodb-server-*.gpg
+  curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc \
+    | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
+  echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] \
+    https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" \
+    | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
   sudo apt-get update -qq
   sudo apt-get install -y -qq mongodb-org
 fi
 sudo systemctl enable --now mongod
 systemctl is-active mongod && echo "[OK] MongoDB activo." || echo "[WARN] MongoDB no activo."
 
-# ── 3. Apache Kafka 3.7 (KRaft, sin ZooKeeper) ──────────────────────────────
-echo "[Kafka] Instalando Apache Kafka 3.7..."
-KAFKA_VERSION="3.7.2"
+# ── 3. Apache Kafka 3.9 (KRaft, sin ZooKeeper) ──────────────────────────────
+echo "[Kafka] Instalando Apache Kafka 3.9..."
+KAFKA_VERSION="3.9.2"
 KAFKA_DIR="/opt/kafka"
 KAFKA_USER="kafka"
 
@@ -385,6 +387,9 @@ SONAR_USER="sonarqube"
 
 id "\$SONAR_USER" &>/dev/null || sudo useradd -r -s /bin/false "\$SONAR_USER"
 
+# Java 17 requerido: SonarQube 10.x usa SecurityManager eliminado en Java 21
+sudo apt-get install -y -qq openjdk-17-jdk
+
 if [[ ! -d "\$SONAR_DIR" ]]; then
   wget -qO /tmp/sonarqube.zip \
     "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-\${SONAR_VERSION}.zip"
@@ -392,7 +397,11 @@ if [[ ! -d "\$SONAR_DIR" ]]; then
   sudo ln -sfn "/opt/sonarqube-\${SONAR_VERSION}" "\$SONAR_DIR"
   rm /tmp/sonarqube.zip
 fi
-sudo chown -R "\$SONAR_USER:\$SONAR_USER" "\$SONAR_DIR"
+sudo chown -R "\$SONAR_USER:\$SONAR_USER" "/opt/sonarqube-\${SONAR_VERSION}"
+
+# Kafka ocupa el puerto 9092; H2 embebido debe usar otro puerto
+grep -q 'sonar.embeddedDatabase.port' "\$SONAR_DIR/conf/sonar.properties" \
+  || echo 'sonar.embeddedDatabase.port=9094' | sudo tee -a "\$SONAR_DIR/conf/sonar.properties"
 
 sudo tee /etc/systemd/system/sonarqube.service > /dev/null <<EOF
 [Unit]
@@ -402,9 +411,11 @@ After=network.target
 [Service]
 Type=forking
 User=\$SONAR_USER
+Environment=SONAR_JAVA_PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin/java
 ExecStart=\$SONAR_DIR/bin/linux-x86-64/sonar.sh start
 ExecStop=\$SONAR_DIR/bin/linux-x86-64/sonar.sh stop
-PIDFile=\$SONAR_DIR/bin/linux-x86-64/.SonarQube.pid
+PIDFile=\$SONAR_DIR/bin/linux-x86-64/SonarQube.pid
+TimeoutStartSec=300
 Restart=on-failure
 LimitNOFILE=65536
 LimitNPROC=8192
@@ -415,15 +426,18 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now sonarqube
-sleep 5
+sleep 10
 systemctl is-active sonarqube && echo "[OK] SonarQube activo." || echo "[WARN] SonarQube no activo (puede tardar 1-2 min en arrancar)."
 
 # ── 6. Jenkins LTS ───────────────────────────────────────────────────────────
 echo "[Jenkins] Instalando Jenkins LTS..."
 if ! command -v jenkins &>/dev/null && ! systemctl list-units --type=service | grep -q jenkins; then
-  curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key \
-    | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-  echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] \
+  sudo rm -f /usr/share/keyrings/jenkins-keyring.asc /usr/share/keyrings/jenkins-keyring.gpg \
+             /etc/apt/sources.list.d/jenkins.list
+  # La clave jenkins.io-2023.key expiró en mar-2026; obtener la vigente del keyserver
+  gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 7198F4B714ABFC68
+  gpg --export 7198F4B714ABFC68 | sudo tee /usr/share/keyrings/jenkins-keyring.gpg > /dev/null
+  echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.gpg] \
     https://pkg.jenkins.io/debian-stable binary/" \
     | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
   sudo apt-get update -qq
@@ -467,29 +481,24 @@ sudo systemctl enable --now wiremock
 sleep 2
 systemctl is-active wiremock && echo "[OK] WireMock activo." || echo "[WARN] WireMock no activo."
 
-# ── 8. Narayana LRA Coordinator (JAR standalone) ──────────────────────────────
+# ── 8. Narayana LRA Coordinator (Docker) ──────────────────────────────────────
 echo "[LRA] Instalando Narayana LRA Coordinator..."
-LRA_VERSION="7.0.3.Final"
-LRA_JAR="/opt/lra-coordinator/lra-coordinator.jar"
-LRA_USER="lra"
-
-id "\$LRA_USER" &>/dev/null || sudo useradd -r -s /bin/false "\$LRA_USER"
-sudo mkdir -p /opt/lra-coordinator
-if [[ ! -f "\$LRA_JAR" ]]; then
-  sudo wget -qO "\$LRA_JAR" \
-    "https://repo1.maven.org/maven2/org/jboss/narayana/lra/lra-coordinator-quarkus/\${LRA_VERSION}/lra-coordinator-quarkus-\${LRA_VERSION}-runner.jar"
-fi
-sudo chown -R "\$LRA_USER:\$LRA_USER" /opt/lra-coordinator
+docker pull quay.io/jbosstm/lra-coordinator:latest
 
 sudo tee /etc/systemd/system/lra-coordinator.service > /dev/null <<EOF
 [Unit]
 Description=Narayana LRA Coordinator
-After=network.target
+After=docker.service
+Requires=docker.service
 
 [Service]
 Type=simple
-User=\$LRA_USER
-ExecStart=/usr/bin/java -jar \$LRA_JAR -Dquarkus.http.port=50000
+ExecStartPre=-/usr/bin/docker rm -f lra-coordinator
+ExecStart=/usr/bin/docker run --rm --name lra-coordinator \
+  -p 50000:50000 \
+  -e QUARKUS_HTTP_PORT=50000 \
+  quay.io/jbosstm/lra-coordinator:latest
+ExecStop=/usr/bin/docker stop lra-coordinator
 Restart=on-failure
 RestartSec=5
 
@@ -499,7 +508,7 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now lra-coordinator
-sleep 2
+sleep 3
 systemctl is-active lra-coordinator && echo "[OK] LRA Coordinator activo." || echo "[WARN] LRA Coordinator no activo."
 
 # ── 9. PostgreSQL 16 ──────────────────────────────────────────────────────────

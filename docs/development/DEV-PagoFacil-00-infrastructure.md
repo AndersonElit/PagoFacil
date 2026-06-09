@@ -38,21 +38,28 @@ El script `vps-setup.sh all` instala en el VPS:
 ### 3.1 Crear el VPS
 
 ```bash
-bash .claude/scripts/qemu-vps.sh create \
-  --name pagofacil-dev \
-  --os ubuntu-26.04 \
-  --cpus 4 \
-  --ram 8G \
-  --disk 80G
+bash .claude/scripts/qemu-vps.sh create --vcpus 4 --ram 8192 --disksize 60G
 ```
 
-El script imprime la `<VPS_IP>` asignada. Exportarla como variable de entorno para los pasos siguientes:
+Próximos pasos:
+  1. Conectar a la consola:   virsh console sdlc-vps
+  2. Instalar Ubuntu (ver PLAN-VPS-LOCAL-QEMU.md § Paso 3)
+  3. Ver IP asignada:         ./qemu-vps.sh status
+  4. Config post-install:     ./qemu-vps.sh setup --vm-ip <IP>
 
-```bash
-export VPS_IP=<VPS_IP>
-```
+# Ver IP asignada
+virsh start sdlc-vps
+.claude/scripts/qemu-vps.sh status
+
+# Configuración post-instalación OCI-compatible (SSH key-only, sudo NOPASSWD,
+# hostname, UTC, NTP, UFW, cloud-init NoCloud, sysctl vm.max_map_count)
+.claude/scripts/qemu-vps.sh setup --vm-ip <VPS_IP>
 
 ### 3.2 Instalar todos los servicios del stack
+
+# Inhabilitar autenticacion con contraseña
+echo "ubuntu ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/ubuntu-nopasswd
+sudo chmod 440 /etc/sudoers.d/ubuntu-nopasswd
 
 ```bash
 bash .claude/scripts/vps-setup.sh all \
