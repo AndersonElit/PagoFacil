@@ -230,27 +230,6 @@ if [[ \$KERNEL_MAJOR -gt 6 ]] || { [[ \$KERNEL_MAJOR -eq 6 ]] && [[ \$KERNEL_MIN
   echo "[MongoDB] Kernel \$(uname -r) >= 6.19 — MongoDB incompatible (SERVER-121912)."
   echo "[MongoDB] Instalando FerretDB (proxy MongoDB-compatible sobre PostgreSQL)..."
 
-  # Instalar PostgreSQL anticipadamente si no está presente (FerretDB lo requiere)
-  if ! command -v psql &>/dev/null; then
-    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-      | sudo gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
-    PGDG_CS=\$(lsb_release -cs)
-    curl -sf "https://apt.postgresql.org/pub/repos/apt/dists/\${PGDG_CS}-pgdg/InRelease" &>/dev/null \
-      || PGDG_CS="noble"
-    echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt \${PGDG_CS}-pgdg main" \
-      | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq postgresql-16
-    sudo systemctl enable --now postgresql
-    sleep 2
-  fi
-
-  # Crear rol y base de datos para FerretDB (idempotente)
-  sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='ferretdb'" \
-    | grep -q 1 || sudo -u postgres psql -c "CREATE USER ferretdb WITH PASSWORD 'ferretdb';"
-  sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='ferretdb'" \
-    | grep -q 1 || sudo -u postgres psql -c "CREATE DATABASE ferretdb OWNER ferretdb;"
-
   FERRETDB_VERSION="1.24.0"
   if ! command -v ferretdb &>/dev/null; then
     # Intentar descarga directa del binario; si falla, probar el tarball
@@ -268,16 +247,22 @@ if [[ \$KERNEL_MAJOR -gt 6 ]] || { [[ \$KERNEL_MAJOR -eq 6 ]] && [[ \$KERNEL_MIN
   ferretdb --version 2>/dev/null | head -1 || true
 
   id "ferretdb" &>/dev/null || sudo useradd -r -s /bin/false "ferretdb"
+  sudo mkdir -p /var/lib/ferretdb
+  sudo chown ferretdb:ferretdb /var/lib/ferretdb
 
   sudo tee /etc/systemd/system/mongod.service > /dev/null <<EOF
 [Unit]
-Description=FerretDB (MongoDB-compatible, backend PostgreSQL)
-After=network.target postgresql.service
+Description=FerretDB (MongoDB-compatible, SQLite backend)
+After=network.target
 
 [Service]
 Type=simple
 User=ferretdb
-ExecStart=/usr/local/bin/ferretdb --listen-addr=:27017 --postgresql-url=postgres://ferretdb:ferretdb@localhost/ferretdb?sslmode=disable
+ExecStart=/usr/local/bin/ferretdb \\
+  --handler=sqlite \\
+  --sqlite-url=file:/var/lib/ferretdb/ \\
+  --state-dir=/var/lib/ferretdb \\
+  --listen-addr=:27017
 Restart=on-failure
 RestartSec=5
 
@@ -498,9 +483,9 @@ if [[ ! -d "\$SONAR_DIR" ]]; then
 fi
 sudo chown -R "\$SONAR_USER:\$SONAR_USER" "/opt/sonarqube-\${SONAR_VERSION}"
 
-# Kafka ocupa el puerto 9092; H2 embebido debe usar otro puerto
-grep -q 'sonar.embeddedDatabase.port' "\$SONAR_DIR/conf/sonar.properties" \
-  || echo 'sonar.embeddedDatabase.port=9094' | sudo tee -a "\$SONAR_DIR/conf/sonar.properties"
+# Kafka ocupa el puerto 9092; reemplazar la línea (comentada o activa) con el valor correcto
+sudo sed -i '/sonar\.embeddedDatabase\.port/d' "\$SONAR_DIR/conf/sonar.properties"
+echo 'sonar.embeddedDatabase.port=9094' | sudo tee -a "\$SONAR_DIR/conf/sonar.properties"
 
 sudo tee /etc/systemd/system/sonarqube.service > /dev/null <<EOF
 [Unit]
@@ -511,6 +496,7 @@ After=network.target
 Type=forking
 User=\$SONAR_USER
 Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+Environment="PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=\$SONAR_DIR/bin/linux-x86-64/sonar.sh start
 ExecStop=\$SONAR_DIR/bin/linux-x86-64/sonar.sh stop
 PIDFile=\$SONAR_DIR/bin/linux-x86-64/SonarQube.pid
