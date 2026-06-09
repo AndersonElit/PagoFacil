@@ -3719,7 +3719,8 @@ log "Aplicando nombre de proyecto '$PROJECT_NAME' al árbol Terraform generado..
 find "$TERRAFORM_ROOT" -type f \
   \( -name '*.tf' -o -name '*.yaml' -o -name '*.yml' -o -name '*.tfvars' -o -name '*.json' \) \
   -print0 | xargs -0 --no-run-if-empty sed -i \
-    -e "s#__PROJECT_NAME__#${PROJECT_NAME}#g"
+    -e "s#__PROJECT_NAME__#${PROJECT_NAME}#g" \
+    -e "s#__VPS_IP__#${VPS_IP}#g"
 log_ok "Nombre de proyecto '$PROJECT_NAME' aplicado al árbol Terraform."
 
 log_ok "Estructura Terraform creada en $TERRAFORM_ROOT."
