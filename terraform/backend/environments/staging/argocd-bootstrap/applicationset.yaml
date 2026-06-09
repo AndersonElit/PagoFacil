@@ -9,6 +9,33 @@ spec:
     - list:
         elements:
           # -- services managed by scaffold --
+          - service: report-processing-service
+            repoURL: http://localhost:3000/pagofacil/report-processing-service.git
+            revision: main
+          - service: report-extraction-service
+            repoURL: http://localhost:3000/pagofacil/report-extraction-service.git
+            revision: main
+          - service: integration-service
+            repoURL: http://localhost:3000/pagofacil/integration-service.git
+            revision: main
+          - service: reporting-projection-service
+            repoURL: http://localhost:3000/pagofacil/reporting-projection-service.git
+            revision: main
+          - service: audit-service
+            repoURL: http://localhost:3000/pagofacil/audit-service.git
+            revision: main
+          - service: notification-service
+            repoURL: http://localhost:3000/pagofacil/notification-service.git
+            revision: main
+          - service: fraud-compliance-service
+            repoURL: http://localhost:3000/pagofacil/fraud-compliance-service.git
+            revision: main
+          - service: wallet-service
+            repoURL: http://localhost:3000/pagofacil/wallet-service.git
+            revision: main
+          - service: identity-service
+            repoURL: http://localhost:3000/pagofacil/identity-service.git
+            revision: main
           # Las entradas se añaden automáticamente al correr maven_hexagonal_scaffold.py.
           # repoURL apunta a Gitea en floci-net (http://gitea:3000); ArgoCD llega a él
           # porque el cluster K3d (donde corre k3s) está en la misma red floci-net.

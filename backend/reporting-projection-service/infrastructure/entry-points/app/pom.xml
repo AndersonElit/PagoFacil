@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.reportingprojectionservice</groupId>
+        <artifactId>reporting-projection-service</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../../../pom.xml</relativePath>
+    </parent>
+    <groupId>com.reportingprojectionservice.app</groupId>
+    <artifactId>infrastructure-entry-points-app</artifactId>
+    <dependencies>
+<dependency>
+    <groupId>com.reportingprojectionservice.restapi</groupId>
+    <artifactId>infrastructure-entry-points-rest-api</artifactId>
+    <version>${project.version}</version>
+</dependency>
+</dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <workingDirectory>${project.basedir}/../../../</workingDirectory>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

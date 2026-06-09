@@ -13,7 +13,7 @@ data "aws_subnets" "default" {
 locals {
   project_name = "pagofacil"
   environment  = "dev"
-  services     = []
+  services     = ["identity-service", "wallet-service", "fraud-compliance-service", "notification-service", "audit-service", "reporting-projection-service", "integration-service", "report-extraction-service", "report-processing-service"]
 
   vpc_id     = data.aws_vpc.default.id
   vpc_cidr   = data.aws_vpc.default.cidr_block

@@ -53,6 +53,10 @@ Jenkins (stages)
 
 El script `setup-cicd-pipeline.sh` orquesta todos los pasos (0 a 6) de forma autónoma en el entorno **dev**. Para staging/prod, los pasos deben ejecutarse manualmente o adaptarse al pipeline de IaC.
 
+# REgistrar insecure registry
+
+echo '{"insecure-registries":["<VPS_IP>:3000"]}' | sudo tee /etc/docker/daemon.json && sudo systemctl reload docker
+
 ```bash
 bash .claude/scripts/setup-cicd-pipeline.sh \
   -P pagofacil \

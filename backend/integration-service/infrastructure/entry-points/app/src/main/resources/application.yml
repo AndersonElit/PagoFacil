@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: integration-service
+  config:
+    import: "aws-secretsmanager:/pagofacil/${APP_ENV:dev}/integration-service"
+  cloud:
+    aws:
+      region:
+        static: us-east-1
+  r2dbc:
+    url: ${R2DBC_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:integration-service-group}
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: '*'
+camel:
+  lra:
+    coordinator-url: ${LRA_COORDINATOR_URL}
+external:
+  kyc:
+    base-url: ${EXT_KYC_BASE_URL}
+  aml:
+    base-url: ${EXT_AML_BASE_URL}
+  financial-entities:
+    base-url: ${EXT_FINANCIAL_ENTITIES_BASE_URL}
+  payment-gateways:
+    base-url: ${EXT_PAYMENT_GATEWAYS_BASE_URL}
+  sms-email:
+    base-url: ${EXT_SMS_EMAIL_BASE_URL}
+server:
+  port: ${SERVER_PORT:8090}

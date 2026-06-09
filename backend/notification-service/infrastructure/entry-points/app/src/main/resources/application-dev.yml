@@ -1,0 +1,8 @@
+spring:
+  cloud:
+    aws:
+      secretsmanager:
+        endpoint: ${SM_ENDPOINT:http://localhost:4566}
+      credentials:
+        access-key: test
+        secret-key: test
