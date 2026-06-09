@@ -15,6 +15,7 @@ Etapa 2 — Análisis de Requerimientos (SRS)        ✓ completada
 Etapa 2b — Contexto Arquitectónico (ADC)          ✓ completada
 Etapa 3 — Pre-Diseño (Strategic SDD)              ✓ completada
 Etapa 4 — Diseño Técnico (Technical SDD)          ✓ completada
+Etapa 4b — Plan de Desarrollo                     ✓ completada
 Etapa 5 — Implementación                          ← próximo paso
 ```
 
@@ -209,14 +210,88 @@ Etapa 5 — Implementación                          ← próximo paso
 
 ---
 
+---
+
+## Etapa 4b — Plan de Desarrollo
+
+### Proceso
+
+1. Se ejecuta la skill `/development-plan` con los documentos del Technical SDD como entrada (`docs/design/`).
+2. El plan de desarrollo generado se guarda en `docs/development/` — un documento por componente.
+3. Estos documentos sirven como guía ejecutable para la etapa de Implementación.
+
+### Artefactos generados
+
+**Documento maestro:**
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/development/DEV-PagoFacil-roadmap.md`](docs/development/DEV-PagoFacil-roadmap.md) | Índice maestro — secuencia de 22 etapas, mapa de microservicios, features frontend, ambiente VPS y Definition of Done |
+
+**Infraestructura y plataforma:**
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/development/DEV-PagoFacil-00-infrastructure.md`](docs/development/DEV-PagoFacil-00-infrastructure.md) | Etapa 0 — Provisionar VPS Ubuntu 26.04 LTS, K3s nativo, floci, scripts `qemu-vps.sh` y `init-dev-environment.sh` |
+| [`docs/development/DEV-PagoFacil-0c-observability.md`](docs/development/DEV-PagoFacil-0c-observability.md) | Etapa 0c — Stack OTEL + Prometheus + Grafana + Jaeger + Loki; `setup-observability.sh`; módulo Terraform staging/prod |
+| [`docs/development/DEV-PagoFacil-01-databases.md`](docs/development/DEV-PagoFacil-01-databases.md) | Etapa 1 — `init-databases.sh`; Database-per-Service PostgreSQL + MongoDB; changelogs Liquibase en repo `pagofacil-migrations` |
+| [`docs/development/DEV-PagoFacil-02-scaffold.md`](docs/development/DEV-PagoFacil-02-scaffold.md) | Etapa 2 — Comando `scaffold-all-services.sh` completo; Jenkinsfiles (Spring/Spark/Frontend); Helm charts; observabilidad automática |
+| [`docs/development/DEV-PagoFacil-02b-cicd.md`](docs/development/DEV-PagoFacil-02b-cicd.md) | Etapa 2b — `setup-cicd-pipeline.sh`; Jenkins systemd en VPS; 10 jobs multibranch; webhooks Gitea; bootstrap ArgoCD K3s |
+
+**Microservicios (uno por bounded context):**
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/development/DEV-PagoFacil-03-ms-identity-service.md`](docs/development/DEV-PagoFacil-03-ms-identity-service.md) | Etapa 3a — BC-01 Identity; KYC, MFA, autenticación; saga onboarding; outbox; TDD por capa |
+| [`docs/development/DEV-PagoFacil-03-ms-wallet-service.md`](docs/development/DEV-PagoFacil-03-ms-wallet-service.md) | Etapa 3b — BC-02 Wallet; operaciones atómicas débito/crédito/reserva; límites transaccionales; TDD |
+| [`docs/development/DEV-PagoFacil-03-ms-notification-service.md`](docs/development/DEV-PagoFacil-03-ms-notification-service.md) | Etapa 3c — BC-04 Notification; Kafka consumer puro; delegación de envío al integration-service |
+| [`docs/development/DEV-PagoFacil-03-ms-fraud-compliance-service.md`](docs/development/DEV-PagoFacil-03-ms-fraud-compliance-service.md) | Etapa 3d — BC-03 Fraud & Compliance; evaluación AML/antifraude; ciclo de vida de alertas; TDD |
+| [`docs/development/DEV-PagoFacil-03-ms-integration-service.md`](docs/development/DEV-PagoFacil-03-ms-integration-service.md) | Etapa 3e — BC-05 Integration; Apache Camel ACL; orquestador Narayana LRA; 3 sagas; WireMock en pruebas |
+| [`docs/development/DEV-PagoFacil-03-ms-audit-service.md`](docs/development/DEV-PagoFacil-03-ms-audit-service.md) | Etapa 3f — BC-06 Audit; MongoDB append-only; trazas inmutables; masking PII; TDD |
+| [`docs/development/DEV-PagoFacil-03-ms-projection-service.md`](docs/development/DEV-PagoFacil-03-ms-projection-service.md) | Etapa 3g — BC-07 CQRS; único escritor de `pagofacil_readmodel`; 9 projectors; idempotencia |
+| [`docs/development/DEV-PagoFacil-03-ms-report-extraction-service.md`](docs/development/DEV-PagoFacil-03-ms-report-extraction-service.md) | Etapa 3h — MS1 Spark/Scala; `SparkJdbcSourceAdapter`; validación de esquema; Parquet `raw/`; CronJob K8s |
+| [`docs/development/DEV-PagoFacil-03-ms-report-processing-service.md`](docs/development/DEV-PagoFacil-03-ms-report-processing-service.md) | Etapa 3i — MS2 Spark/Scala; patrón Factory (Abierto/Cerrado) por `ReportType`; Parquet `processed/`; CronJob K8s |
+
+**Features frontend (uno por área funcional):**
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/development/DEV-PagoFacil-04-fe-auth.md`](docs/development/DEV-PagoFacil-04-fe-auth.md) | Etapa 4a — Registro, login MFA, callback Cognito; TDD Vitest + RTL + MSW; Playwright ATDD |
+| [`docs/development/DEV-PagoFacil-04-fe-wallets.md`](docs/development/DEV-PagoFacil-04-fe-wallets.md) | Etapa 4b — Saldo, historial paginado con filtros, cuentas bancarias vinculadas |
+| [`docs/development/DEV-PagoFacil-04-fe-transactions.md`](docs/development/DEV-PagoFacil-04-fe-transactions.md) | Etapa 4c — Depósito, transferencia, retiro; `Idempotency-Key`; polling de estado de saga |
+| [`docs/development/DEV-PagoFacil-04-fe-compliance.md`](docs/development/DEV-PagoFacil-04-fe-compliance.md) | Etapa 4d — Dashboard alertas AML/fraude; resolución por rol (FRAUD_ANALYST, COMPLIANCE_OFFICER) |
+| [`docs/development/DEV-PagoFacil-04-fe-audit.md`](docs/development/DEV-PagoFacil-04-fe-audit.md) | Etapa 4e — Dashboard trazabilidad; filtros avanzados por correlationId, sagaId, eventType |
+| [`docs/development/DEV-PagoFacil-04-fe-reporting.md`](docs/development/DEV-PagoFacil-04-fe-reporting.md) | Etapa 4f — Catálogo de reportes, solicitud on-demand, polling de estado, descarga PDF/XLS/CSV |
+
+**Pruebas y capa serverless:**
+
+| Archivo | Descripción |
+|---------|-------------|
+| [`docs/development/DEV-PagoFacil-05-tests.md`](docs/development/DEV-PagoFacil-05-tests.md) | Etapa 5 — Pruebas de integración (sagas completas + compensaciones), E2E Playwright, estrés y carga con k6, verificación E2E de observabilidad |
+| [`docs/development/DEV-PagoFacil-06-reporting-serverless.md`](docs/development/DEV-PagoFacil-06-reporting-serverless.md) | Etapa 6 — Lambda Kafka Consumer + EventBridge rules + lambdas PDF/XLS/CSV; pytest TDD; Terraform floci/AWS |
+
+### Resumen del Plan de Desarrollo
+
+| Campo | Valor |
+|-------|-------|
+| **Documentos generados** | 23 (1 roadmap + 5 plataforma + 9 microservicios + 6 features frontend + 2 pruebas/serverless) |
+| **Microservicios cubiertos** | 9 Spring Boot WebFlux + 2 Spark/Scala (MS1, MS2) + 1 capa serverless Lambda |
+| **Features frontend** | 6 (auth, wallets, transactions, compliance, audit, reporting) |
+| **Esfuerzo estimado total** | ~47 días de desarrollo |
+| **Orden de implementación** | identity → wallet → notification → fraud → integration → audit → projection → MS1 → MS2 → frontend → serverless |
+| **Estrategia de pruebas** | TDD obligatorio (Red-Green-Refactor) en todas las capas; JUnit 5 + Mockito + Testcontainers + WebTestClient (backend); Vitest + RTL + MSW + Playwright (frontend) |
+| **Ambiente objetivo** | VPS Ubuntu 26.04 LTS — K3s nativo + floci (`VPS_IP:4566`); sin Docker local, sin EKS en dev |
+
+---
+
 ## Próximo paso
 
-Con el Technical SDD generado, aprovisionar la infraestructura base y generar el plan de desarrollo:
+Con el plan de desarrollo generado, iniciar la etapa de Implementación:
 
 ```bash
-# 1. Aprovisionar infraestructura base
-bash .claude/scripts/base-infrastructure-builder.sh
-
-# 2. Generar plan de desarrollo
-/development-plan docs/design/
+# Etapa 0 — Aprovisionar VPS e infraestructura base
+bash .claude/scripts/base-infrastructure-builder.sh -P pagofacil --vps-ip <VPS_IP>
+bash .claude/scripts/init-dev-environment.sh -P pagofacil --vps-ip <VPS_IP>
 ```
+
+Ver [`docs/development/DEV-PagoFacil-roadmap.md`](docs/development/DEV-PagoFacil-roadmap.md) para la secuencia completa de etapas.
