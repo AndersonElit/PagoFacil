@@ -7,3 +7,12 @@ __pycache__/
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
+
+# Secrets / credenciales — nunca commitear
+**/.kube/
+**/.sonar-env
+**/.observability-env
+**/terraform.tfstate
+**/.env
+**/*.pem
+**/*.key
