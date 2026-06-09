@@ -18,7 +18,7 @@ bash .claude/scripts/init-databases.sh \
   -p pagofacil \
   -m pagofacil \
   -u pagofacil_app \
-  -w <CLAVE_APP>
+  -w p4g0f4c1l4pp
 ```
 
 ### Qué automatiza el script
