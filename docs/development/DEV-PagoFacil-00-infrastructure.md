@@ -86,7 +86,7 @@ Este comando es idempotente. Realiza la instalación completa de todos los servi
 
 ```bash
 # Todos los servicios son unidades systemd — deben responder "active"
-ssh ubuntu@<VPS_IP> "systemctl is-active postgresql mongodb kafka sonarqube jenkins gitea lra-coordinator wiremock floci"
+ssh ubuntu@<VPS_IP> "systemctl is-active postgresql mongod kafka sonarqube jenkins gitea lra-coordinator wiremock floci"
 ```
 
 Todos deben responder `active`.
